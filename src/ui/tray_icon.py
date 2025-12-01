@@ -132,7 +132,8 @@ class TrayIcon:
 
     def _on_exit_click(self, icon, item) -> None:
         """Handle Exit click."""
-        self.stop()
+        # Don't stop here - let the app decide if exit is allowed
+        # The app will call stop() when actually exiting
         self.on_exit()
 
     def start(self) -> None:

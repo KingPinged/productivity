@@ -107,7 +107,7 @@ class ProductivityApp:
             on_pause=self._on_pause,
             on_stop=self._on_stop,
             on_settings=self._on_settings,
-            on_exit=self._on_exit,
+            on_exit=self._on_exit_request,
         )
 
         if self.tray_icon.is_available():
@@ -311,20 +311,41 @@ class ProductivityApp:
         self.main_window.show()
 
     def _on_close(self) -> None:
-        """Handle window close - minimize to tray."""
+        """Handle window close - minimize to tray or block during work."""
+        # During work session, only allow minimize to tray (not close)
+        if self.timer.state == TimerState.WORKING:
+            if self.tray_icon.is_available():
+                self.main_window.hide()
+            # If no tray, just ignore the close - can't escape that easily!
+            return
+
         if self.tray_icon.is_available():
             self.main_window.hide()
         else:
-            # No tray available - ask to exit
-            if self.timer.state != TimerState.IDLE:
-                result = messagebox.askyesno(
-                    "Session Active",
-                    "A session is currently active. Are you sure you want to exit?"
-                )
-                if not result:
-                    return
-
             self._on_exit()
+
+    def _on_exit_request(self) -> None:
+        """Handle exit request - requires challenge during work session."""
+        if self.timer.state == TimerState.WORKING and self.disable_guard.is_session_active():
+            # Show the window so user can see the challenge
+            self.main_window.show()
+            self._show_exit_challenge()
+        else:
+            self._on_exit()
+
+    def _show_exit_challenge(self) -> None:
+        """Show the exit challenge dialog."""
+        cooldown_remaining = self.disable_guard.get_cooldown_remaining()
+        challenge_text = self.disable_guard.generate_challenge_text()
+
+        TypingChallengeDialog(
+            parent=self.root,
+            challenge_text=challenge_text,
+            cooldown_remaining=cooldown_remaining,
+            on_complete=self._on_exit,
+            on_cancel=lambda: None,  # Do nothing on cancel
+            on_cooldown_disable=self._on_exit if cooldown_remaining == 0 else lambda: None,
+        )
 
     def _on_exit(self) -> None:
         """Handle application exit."""
