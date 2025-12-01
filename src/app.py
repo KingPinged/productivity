@@ -213,6 +213,11 @@ class ProductivityApp:
 
     def _on_stop(self) -> None:
         """Handle stop button click - requires disable guard."""
+        # Schedule on main thread since may be called from tray thread
+        self.root.after(0, self._handle_stop)
+
+    def _handle_stop(self) -> None:
+        """Handle stop on main thread."""
         if self.timer.state == TimerState.IDLE:
             return
 
@@ -247,6 +252,11 @@ class ProductivityApp:
 
     def _on_settings(self) -> None:
         """Handle settings button click."""
+        # Schedule on main thread since may be called from tray thread
+        self.root.after(0, self._handle_settings)
+
+    def _handle_settings(self) -> None:
+        """Handle settings on main thread."""
         if self.timer.state != TimerState.IDLE:
             messagebox.showwarning(
                 "Settings Locked",
@@ -308,7 +318,8 @@ class ProductivityApp:
 
     def _on_tray_show(self) -> None:
         """Handle tray icon show click."""
-        self.main_window.show()
+        # Schedule on main thread since called from tray thread
+        self.root.after(0, self.main_window.show)
 
     def _on_close(self) -> None:
         """Handle window close - minimize to tray or block during work."""
@@ -326,6 +337,12 @@ class ProductivityApp:
 
     def _on_exit_request(self) -> None:
         """Handle exit request - requires challenge during work session."""
+        # Schedule on main thread since this may be called from tray thread
+        # Tkinter is not thread-safe
+        self.root.after(0, self._handle_exit_request)
+
+    def _handle_exit_request(self) -> None:
+        """Handle exit request on main thread."""
         if self.timer.state == TimerState.WORKING and self.disable_guard.is_session_active():
             # Show the window so user can see the challenge
             self.main_window.show()
