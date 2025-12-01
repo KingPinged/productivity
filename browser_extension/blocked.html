@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Site Blocked - Productivity Timer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #fff;
+    }
+
+    .container {
+      text-align: center;
+      padding: 40px;
+      max-width: 600px;
+    }
+
+    .icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 15px;
+      color: #e74c3c;
+    }
+
+    .message {
+      font-size: 1.2rem;
+      color: #b0b0b0;
+      margin-bottom: 30px;
+      line-height: 1.6;
+    }
+
+    .blocked-url {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 15px 25px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.9rem;
+      color: #888;
+      word-break: break-all;
+      margin-bottom: 30px;
+    }
+
+    .motivation {
+      font-size: 1.3rem;
+      color: #3498db;
+      font-style: italic;
+      margin-bottom: 30px;
+      padding: 20px;
+      border-left: 4px solid #3498db;
+      background: rgba(52, 152, 219, 0.1);
+      text-align: left;
+    }
+
+    .actions {
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 12px 30px;
+      border: none;
+      border-radius: 25px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: #3498db;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2980b9;
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: #888;
+      border: 2px solid #444;
+    }
+
+    .btn-secondary:hover {
+      border-color: #666;
+      color: #aaa;
+    }
+
+    .timer-hint {
+      margin-top: 40px;
+      font-size: 0.9rem;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">🛑</div>
+    <h1>Site Blocked</h1>
+    <p class="message">
+      This website is blocked during your focus session.<br>
+      Stay focused and keep working towards your goals!
+    </p>
+
+    <div class="blocked-url" id="blocked-url"></div>
+
+    <div class="motivation" id="motivation"></div>
+
+    <div class="actions">
+      <a href="about:newtab" class="btn btn-primary">Back to Work</a>
+      <button class="btn btn-secondary" onclick="window.history.back()">Go Back</button>
+    </div>
+
+    <p class="timer-hint">
+      Complete your focus session in the Productivity Timer app to unblock this site.
+    </p>
+  </div>
+
+  <script>
+    // Show blocked URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const blockedUrl = urlParams.get('url');
+    if (blockedUrl) {
+      try {
+        const url = new URL(blockedUrl);
+        document.getElementById('blocked-url').textContent = url.hostname;
+      } catch {
+        document.getElementById('blocked-url').textContent = blockedUrl;
+      }
+    }
+
+    // Motivational quotes
+    const quotes = [
+      "The secret of getting ahead is getting started. — Mark Twain",
+      "Focus on being productive instead of busy. — Tim Ferriss",
+      "The key is not to prioritize what's on your schedule, but to schedule your priorities. — Stephen Covey",
+      "Starve your distractions, feed your focus. — Unknown",
+      "You don't have to be great to start, but you have to start to be great. — Zig Ziglar",
+      "Discipline is choosing between what you want now and what you want most. — Abraham Lincoln",
+      "The difference between successful people and really successful people is that really successful people say no to almost everything. — Warren Buffett",
+      "Your future self will thank you for the focus you maintain today.",
+      "Every moment of resistance to distraction is a victory.",
+      "Deep work is the ability to focus without distraction on a cognitively demanding task. — Cal Newport"
+    ];
+
+    const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+    document.getElementById('motivation').textContent = `"${randomQuote}"`;
+  </script>
+</body>
+</html>
