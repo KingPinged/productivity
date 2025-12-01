@@ -19,7 +19,7 @@ def create_shortcut():
         desktop = regular_desktop
     app_dir = Path(__file__).parent.resolve()
     python_exe = sys.executable
-    main_script = app_dir / "main.py"
+    main_script = app_dir / "run.py"
     icon_path = app_dir / "assets" / "icon.ico"
 
     shortcut_path = desktop / "Productivity Timer.lnk"
