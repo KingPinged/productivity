@@ -1,95 +1,131 @@
 """
-Windows auto-start (startup) registration.
+Windows auto-start registration using Task Scheduler.
+Runs the app at logon with admin privileges (no UAC prompt on each login).
 """
 
+import subprocess
 import sys
-import winreg
+import os
 
 from src.utils.constants import APP_NAME
 
+TASK_NAME = APP_NAME
 
-REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
-
-def get_executable_path() -> str:
-    """
-    Get the path to the current executable/script.
-
-    Returns:
-        Path string suitable for registry
-    """
+def _get_command_args() -> tuple[str, str]:
+    """Get the executable and arguments for the scheduled task."""
     if getattr(sys, 'frozen', False):
-        # Running as compiled executable
-        return f'"{sys.executable}"'
+        return sys.executable, ''
     else:
-        # Running as script
-        return f'"{sys.executable}" "{sys.argv[0]}"'
+        # Find run.py relative to the package
+        # sys.argv[0] might be relative, so resolve it
+        script = os.path.abspath(sys.argv[0])
+        # If run.py doesn't exist at argv[0], try finding it from the project root
+        if not os.path.exists(script):
+            # Fallback: look for run.py in the project directory
+            project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            script = os.path.join(project_dir, 'run.py')
+        return sys.executable, script
 
 
 def enable_autostart() -> bool:
     """
-    Add application to Windows startup.
-
-    Returns:
-        True if successful, False otherwise
+    Register app to run at logon with admin privileges via Task Scheduler.
+    Requires the current process to be running as admin to create the task.
     """
     try:
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            REG_PATH,
-            0,
-            winreg.KEY_SET_VALUE
+        exe, script = _get_command_args()
+
+        # Build schtasks command
+        # /RL HIGHEST = run with highest privileges (admin)
+        # /SC ONLOGON = trigger at user logon
+        # /F = force overwrite if exists
+        if script:
+            # Running as script: pythonw.exe run.py
+            # Use pythonw to avoid console window
+            pythonw = exe.replace('python.exe', 'pythonw.exe')
+            if not os.path.exists(pythonw):
+                pythonw = exe
+            cmd = [
+                'schtasks', '/Create',
+                '/TN', TASK_NAME,
+                '/TR', f'"{pythonw}" "{script}"',
+                '/SC', 'ONLOGON',
+                '/RL', 'HIGHEST',
+                '/F',
+            ]
+        else:
+            # Running as compiled exe
+            cmd = [
+                'schtasks', '/Create',
+                '/TN', TASK_NAME,
+                '/TR', f'"{exe}"',
+                '/SC', 'ONLOGON',
+                '/RL', 'HIGHEST',
+                '/F',
+            ]
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
-        winreg.SetValueEx(
-            key,
-            APP_NAME,
-            0,
-            winreg.REG_SZ,
-            get_executable_path()
-        )
-        winreg.CloseKey(key)
-        return True
-    except WindowsError:
+
+        if result.returncode == 0:
+            print(f"Autostart enabled via Task Scheduler (admin)")
+            return True
+        else:
+            print(f"Failed to create scheduled task: {result.stderr.strip()}")
+            return False
+
+    except Exception as e:
+        print(f"Error enabling autostart: {e}")
         return False
 
 
 def disable_autostart() -> bool:
-    """
-    Remove application from Windows startup.
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Remove the scheduled task."""
     try:
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            REG_PATH,
-            0,
-            winreg.KEY_SET_VALUE
+        result = subprocess.run(
+            ['schtasks', '/Delete', '/TN', TASK_NAME, '/F'],
+            capture_output=True, text=True,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
-        winreg.DeleteValue(key, APP_NAME)
-        winreg.CloseKey(key)
+        if result.returncode == 0:
+            print("Autostart disabled")
+
+        # Also clean up old registry entry if it exists
+        _remove_registry_entry()
+
         return True
-    except WindowsError:
+    except Exception as e:
+        print(f"Error disabling autostart: {e}")
         return False
 
 
 def is_autostart_enabled() -> bool:
-    """
-    Check if application is set to start with Windows.
-
-    Returns:
-        True if auto-start is enabled, False otherwise
-    """
+    """Check if the scheduled task exists."""
     try:
+        result = subprocess.run(
+            ['schtasks', '/Query', '/TN', TASK_NAME],
+            capture_output=True, text=True,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _remove_registry_entry() -> None:
+    """Clean up legacy registry Run key if it exists."""
+    try:
+        import winreg
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
-            REG_PATH,
-            0,
-            winreg.KEY_READ
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE,
         )
-        winreg.QueryValueEx(key, APP_NAME)
+        winreg.DeleteValue(key, APP_NAME)
         winreg.CloseKey(key)
-        return True
-    except WindowsError:
-        return False
+        print("Cleaned up old registry autostart entry")
+    except Exception:
+        pass  # Doesn't exist, that's fine

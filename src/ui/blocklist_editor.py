@@ -44,16 +44,7 @@ class BlocklistEditor:
         # Create toplevel window
         self.dialog = ttk.Toplevel(self.parent)
         self.dialog.title("Block Lists")
-        self.dialog.geometry("600x600")
         self.dialog.resizable(True, True)
-        self.dialog.transient(self.parent)
-        self.dialog.grab_set()
-
-        # Center on parent
-        self.dialog.update_idletasks()
-        x = self.parent.winfo_x() + (self.parent.winfo_width() - 600) // 2
-        y = self.parent.winfo_y() + (self.parent.winfo_height() - 600) // 2
-        self.dialog.geometry(f"+{x}+{y}")
 
         # Create notebook for tabs
         notebook = ttk.Notebook(self.dialog)
@@ -91,6 +82,21 @@ class BlocklistEditor:
         )
         save_btn.pack(side=RIGHT)
 
+        # Finalize dialog - MUST be done AFTER all widgets are created
+        self.dialog.update_idletasks()
+
+        # Set size and center on parent
+        width = 600
+        height = 600
+        x = self.parent.winfo_x() + (self.parent.winfo_width() - width) // 2
+        y = self.parent.winfo_y() + (self.parent.winfo_height() - height) // 2
+        self.dialog.geometry(f"{width}x{height}+{x}+{y}")
+
+        # Make modal
+        self.dialog.transient(self.parent)
+        self.dialog.grab_set()
+        self.dialog.focus_set()
+
     def _setup_apps_tab(self, parent: ttk.Frame) -> None:
         """Set up the applications tab."""
         # Categories section
@@ -101,7 +107,7 @@ class BlocklistEditor:
         )
         cat_label.pack(anchor=W, pady=(0, 10))
 
-        cat_frame = ttk.LabelFrame(parent, text="Enable/Disable Categories", padding=10)
+        cat_frame = ttk.Labelframe(parent, text="Enable/Disable Categories", padding=10)
         cat_frame.pack(fill=X, pady=(0, 15))
 
         for category in BLOCKED_APPS.keys():
@@ -194,7 +200,7 @@ class BlocklistEditor:
         )
         cat_label.pack(anchor=W, pady=(0, 10))
 
-        cat_frame = ttk.LabelFrame(parent, text="Enable/Disable Categories", padding=10)
+        cat_frame = ttk.Labelframe(parent, text="Enable/Disable Categories", padding=10)
         cat_frame.pack(fill=X, pady=(0, 15))
 
         for category in BLOCKED_WEBSITES.keys():

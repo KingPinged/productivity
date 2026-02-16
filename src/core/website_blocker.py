@@ -10,6 +10,10 @@ from pathlib import Path
 
 from src.utils.constants import HOSTS_PATH, HOSTS_MARKER_START, HOSTS_MARKER_END
 
+# Separate markers for always-blocked (adult) content
+HOSTS_ADULT_MARKER_START = "# PRODUCTIVITY_TIMER_ADULT_BLOCK_START"
+HOSTS_ADULT_MARKER_END = "# PRODUCTIVITY_TIMER_ADULT_BLOCK_END"
+
 
 class WebsiteBlocker:
     """
@@ -17,17 +21,63 @@ class WebsiteBlocker:
     Requires administrator privileges.
     """
 
-    def __init__(self, blocked_sites: Set[str]):
+    def __init__(self, blocked_sites: Set[str], always_blocked_sites: Set[str] = None,
+                 whitelisted_urls: list = None):
         """
         Initialize the website blocker.
 
         Args:
-            blocked_sites: Set of domain names to block
+            blocked_sites: Set of domain names to block during sessions
+            always_blocked_sites: Set of domain names to always block (adult content)
+            whitelisted_urls: List of URLs that are whitelisted - their domains will be
+                              excluded from hosts file blocking (handled by browser extension)
         """
-        self.blocked_sites = set(blocked_sites)
+        self.whitelisted_urls = whitelisted_urls or []
+        # Filter out domains that have whitelisted URLs
+        self.blocked_sites = self._filter_whitelisted_domains(set(blocked_sites))
+        self.always_blocked_sites = set(always_blocked_sites) if always_blocked_sites else set()
         self._is_blocking = False
         self._backup_path = HOSTS_PATH.parent / "hosts.productivity.backup"
         self._last_error = ""
+
+        # Apply always-blocked sites immediately on init
+        if self.always_blocked_sites:
+            self._apply_always_blocked()
+
+    def _filter_whitelisted_domains(self, blocked_sites: Set[str]) -> Set[str]:
+        """
+        Remove domains from blocked_sites if they have whitelisted URLs.
+        Those domains will be blocked by the browser extension instead,
+        which can handle URL-level whitelisting.
+        """
+        if not self.whitelisted_urls:
+            return blocked_sites
+
+        # Extract domains from whitelisted URLs
+        whitelisted_domains = set()
+        for url in self.whitelisted_urls:
+            # Remove protocol
+            domain = url.lower().replace('https://', '').replace('http://', '')
+            # Remove path
+            domain = domain.split('/')[0]
+            # Remove www. prefix for comparison
+            domain_no_www = domain.replace('www.', '')
+            whitelisted_domains.add(domain)
+            whitelisted_domains.add(domain_no_www)
+            whitelisted_domains.add('www.' + domain_no_www)
+
+        # Filter out domains that have whitelisted URLs
+        filtered = set()
+        for site in blocked_sites:
+            site_lower = site.lower()
+            site_no_www = site_lower.replace('www.', '')
+            # Check if this domain or its www variant is in whitelisted domains
+            if site_lower not in whitelisted_domains and site_no_www not in whitelisted_domains:
+                filtered.add(site)
+            else:
+                print(f"Excluding {site} from hosts file (has whitelisted URLs, browser extension will handle)")
+
+        return filtered
 
     def block(self) -> Tuple[bool, str]:
         """
@@ -125,12 +175,24 @@ class WebsiteBlocker:
 
     def update_blocked_sites(self, blocked_sites: Set[str]) -> None:
         """Update the set of blocked websites."""
-        self.blocked_sites = set(blocked_sites)
+        # Filter out domains that have whitelisted URLs
+        self.blocked_sites = self._filter_whitelisted_domains(set(blocked_sites))
 
         # If currently blocking, re-apply with new sites
         if self._is_blocking:
             self.unblock()
             self.block()
+
+    def add_adult_site(self, domain: str) -> None:
+        """Add a single domain to the always-blocked (adult) set and re-apply hosts rules."""
+        domain = domain.strip().lower()
+        if domain and domain not in self.always_blocked_sites:
+            self.always_blocked_sites.add(domain)
+            self._apply_always_blocked()
+
+    def update_whitelisted_urls(self, whitelisted_urls: list) -> None:
+        """Update the list of whitelisted URLs."""
+        self.whitelisted_urls = whitelisted_urls or []
 
     def is_blocking(self) -> bool:
         """Check if website blocking is currently active."""
@@ -173,23 +235,121 @@ class WebsiteBlocker:
             self._last_error = f"Failed to write hosts file: {e}"
             return False
 
-    def _remove_our_blocks(self, content: str) -> str:
-        """Remove our marker block from hosts content."""
+    def _remove_our_blocks(self, content: str, keep_adult_blocks: bool = True) -> str:
+        """Remove our marker block from hosts content.
+
+        Args:
+            content: Hosts file content
+            keep_adult_blocks: If True, preserve adult content blocks
+        """
         lines = content.split('\n')
         result = []
-        in_our_block = False
+        in_session_block = False
+        in_adult_block = False
 
         for line in lines:
+            # Handle session blocks
             if HOSTS_MARKER_START in line:
-                in_our_block = True
+                in_session_block = True
                 continue
             if HOSTS_MARKER_END in line:
-                in_our_block = False
+                in_session_block = False
                 continue
-            if not in_our_block:
-                result.append(line)
+
+            # Handle adult blocks
+            if HOSTS_ADULT_MARKER_START in line:
+                if keep_adult_blocks:
+                    result.append(line)
+                in_adult_block = True
+                continue
+            if HOSTS_ADULT_MARKER_END in line:
+                if keep_adult_blocks:
+                    result.append(line)
+                in_adult_block = False
+                continue
+
+            # Keep lines that aren't in session block
+            # (adult block lines are kept if keep_adult_blocks is True)
+            if not in_session_block:
+                if in_adult_block and keep_adult_blocks:
+                    result.append(line)
+                elif not in_adult_block:
+                    result.append(line)
 
         # Remove trailing empty lines
+        while result and not result[-1].strip():
+            result.pop()
+
+        return '\n'.join(result)
+
+    def _apply_always_blocked(self) -> Tuple[bool, str]:
+        """
+        Apply always-blocked sites (adult content) to hosts file.
+        These are never removed until app is uninstalled.
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        try:
+            if not HOSTS_PATH.exists():
+                return False, f"Hosts file not found at {HOSTS_PATH}"
+
+            # Read current hosts file
+            content = self._read_hosts()
+
+            # Check if adult blocks already exist
+            if HOSTS_ADULT_MARKER_START in content:
+                # Already have adult blocks, update them
+                content = self._remove_adult_blocks(content)
+
+            # Build adult block entries
+            block_entries = [HOSTS_ADULT_MARKER_START]
+            for site in sorted(self.always_blocked_sites):
+                site = site.strip().lower()
+                if not site:
+                    continue
+
+                block_entries.append(f"0.0.0.0 {site}")
+                if not site.startswith("www."):
+                    block_entries.append(f"0.0.0.0 www.{site}")
+
+            block_entries.append(HOSTS_ADULT_MARKER_END)
+
+            # Append adult blocks
+            new_content = content.rstrip() + "\n\n" + "\n".join(block_entries) + "\n"
+
+            # Write to hosts file
+            success = self._write_hosts(new_content)
+            if not success:
+                return False, self._last_error
+
+            # Flush DNS cache
+            self._flush_dns()
+
+            print(f"Adult content blocking: {len(self.always_blocked_sites)} sites blocked")
+            return True, ""
+
+        except PermissionError:
+            return False, "Permission denied. Run as administrator."
+        except Exception as e:
+            return False, f"Error applying adult blocks: {e}"
+
+    def _remove_adult_blocks(self, content: str) -> str:
+        """Remove adult content blocks from hosts content."""
+        lines = content.split('\n')
+        result = []
+        in_adult_block = False
+
+        for line in lines:
+            if HOSTS_ADULT_MARKER_START in line:
+                in_adult_block = True
+                continue
+            if HOSTS_ADULT_MARKER_END in line:
+                in_adult_block = False
+                continue
+            if not in_adult_block:
+                result.append(line)
+
         while result and not result[-1].strip():
             result.pop()
 

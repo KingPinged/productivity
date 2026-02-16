@@ -43,3 +43,7 @@ productivity_timer_data/
 
 # Logs
 *.log
+
+# Build artifacts
+*.spec
+*.xpi
