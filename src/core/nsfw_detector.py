@@ -48,6 +48,10 @@ class NSFWDetector:
         """Update the OpenAI API key."""
         self.api_key = key
 
+    def _has_page_content(self, signals: PageSignals) -> bool:
+        """Check if signals contain actual page content beyond just a domain/URL."""
+        return bool(signals.title or signals.meta_description or signals.body_text)
+
     def check_content_sync(self, signals: PageSignals) -> dict:
         """
         Synchronous content check. Called from HTTP handler thread.
@@ -79,6 +83,15 @@ class NSFWDetector:
                 'method': 'no_api_key',
             }
 
+        # If we only have a domain (no page content), skip Moderation API and
+        # go straight to GPT-4o-mini. The Moderation API is a text content
+        # moderator — it can't classify domains by name. A URL string like
+        # "https://pornsite.com" scores low because the TEXT isn't explicit.
+        if not self._has_page_content(signals):
+            print(f"[NSFW] Domain-only check for {domain}, skipping moderation -> straight to LLM")
+            return self._check_domain_only(signals)
+
+        # Has page content — use two-tier approach
         # Build text to analyze
         text = self._build_analysis_text(signals)
         print(f"[NSFW] Tier 1: Calling Moderation API for {domain} ({len(text)} chars)")
@@ -88,28 +101,13 @@ class NSFWDetector:
             score = self._call_moderation_api(text)
         except Exception as e:
             print(f"[NSFW] Moderation API error for {domain}: {e}")
-            # Fail open - don't block on API errors
-            return {
-                'is_nsfw': False,
-                'confidence': 0.0,
-                'cached': False,
-                'method': 'error',
-            }
+            # Fall through to LLM instead of failing open
+            print(f"[NSFW] Falling through to LLM for {domain}")
+            return self._check_domain_only(signals)
 
         print(f"[NSFW] Tier 1 score for {domain}: {score:.4f}")
 
         # Evaluate Tier 1 result
-        if score < MODERATION_SAFE_THRESHOLD:
-            # Safe - cache and return
-            print(f"[NSFW] {domain} -> SAFE (score {score:.4f} < {MODERATION_SAFE_THRESHOLD})")
-            self._cache_result(domain, False, score, 'moderation')
-            return {
-                'is_nsfw': False,
-                'confidence': 1.0 - score,
-                'cached': False,
-                'method': 'moderation',
-            }
-
         if score >= MODERATION_NSFW_THRESHOLD:
             # Clearly NSFW - cache, notify, and return
             print(f"[NSFW] {domain} -> NSFW (score {score:.4f} >= {MODERATION_NSFW_THRESHOLD})")
@@ -123,13 +121,14 @@ class NSFWDetector:
                 'method': 'moderation',
             }
 
-        # Ambiguous (0.4 - 0.9) - Tier 2: GPT-4o-mini
-        print(f"[NSFW] {domain} -> AMBIGUOUS (score {score:.4f}), calling Tier 2 LLM...")
+        # Score below NSFW threshold — always verify with LLM
+        # The moderation API is unreliable for domain/URL classification
+        print(f"[NSFW] {domain} -> moderation score {score:.4f}, verifying with LLM...")
         try:
             is_nsfw, confidence = self._call_llm_verification(signals, score)
         except Exception as e:
             print(f"[NSFW] LLM verification error for {domain}: {e}")
-            # Fail open on Tier 2 errors too
+            # Fail open on LLM errors
             self._cache_result(domain, False, score, 'error')
             return {
                 'is_nsfw': False,
@@ -148,6 +147,32 @@ class NSFWDetector:
             'confidence': confidence,
             'cached': False,
             'method': 'llm',
+        }
+
+    def _check_domain_only(self, signals: PageSignals) -> dict:
+        """Direct LLM check for domain-only signals (no page content)."""
+        domain = signals.domain.lower()
+        try:
+            is_nsfw, confidence = self._call_llm_domain_check(domain)
+        except Exception as e:
+            print(f"[NSFW] LLM domain check error for {domain}: {e}")
+            return {
+                'is_nsfw': False,
+                'confidence': 0.0,
+                'cached': False,
+                'method': 'error',
+            }
+
+        print(f"[NSFW] LLM domain check for {domain}: is_nsfw={is_nsfw}, confidence={confidence:.4f}")
+        self._cache_result(domain, is_nsfw, confidence, 'llm_domain')
+        if is_nsfw and self.on_nsfw_detected:
+            self.on_nsfw_detected(domain)
+
+        return {
+            'is_nsfw': is_nsfw,
+            'confidence': confidence,
+            'cached': False,
+            'method': 'llm_domain',
         }
 
     def _build_analysis_text(self, signals: PageSignals) -> str:
@@ -195,6 +220,49 @@ class NSFWDetector:
             scores.get("sexual/minors", 0.0),
         )
         return nsfw_score
+
+    def _call_llm_domain_check(self, domain: str) -> Tuple[bool, float]:
+        """
+        Call GPT-4o-mini to classify a domain name as NSFW or safe.
+        Used when we only have a domain (DNS monitor path) and no page content.
+        Very cheap — ~10 tokens input.
+        """
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = json.dumps({
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": (
+                    "You classify website domains as NSFW (adult/pornographic) or safe. "
+                    "Respond with ONLY a JSON object: {\"nsfw\": true/false}\n"
+                    "NSFW = site's primary purpose is pornographic/adult sexual content.\n"
+                    "NOT NSFW = health, medical, education, news, tech, shopping, social media, art, dating apps, lingerie stores."
+                )},
+                {"role": "user", "content": domain},
+            ],
+            "max_tokens": 20,
+            "temperature": 0,
+        }).encode()
+
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+
+        content = data["choices"][0]["message"]["content"].strip()
+
+        try:
+            result = json.loads(content)
+            is_nsfw = result.get("nsfw", False)
+            return is_nsfw, 0.95 if is_nsfw else 0.95
+        except json.JSONDecodeError:
+            content_lower = content.lower()
+            if "true" in content_lower:
+                return True, 0.8
+            return False, 0.8
 
     def _call_llm_verification(self, signals: PageSignals, moderation_score: float) -> Tuple[bool, float]:
         """
