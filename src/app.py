@@ -32,6 +32,7 @@ from src.ui.blocklist_editor import BlocklistEditor
 from src.ui.tray_icon import TrayIcon
 from src.ui.desktop_stats import DesktopStatsWidget, StatsData
 from src.ui.usage_stats_window import UsageStatsWindow
+from src.ui.nsfw_popup import NSFWStrikePopup
 
 
 class ProductivityApp:
@@ -366,9 +367,8 @@ class ProductivityApp:
         if self.has_admin and hasattr(self, 'website_blocker'):
             self.website_blocker.add_adult_site(domain)
 
-       
-        # Fire adult strike (same as manual adult site visit)
-        self.root.after(0, lambda: self._on_adult_strike())
+        # Fire adult strike with domain info
+        self.root.after(0, lambda d=domain: self._on_adult_strike(d))
 
     def _schedule_nsfw_cache_save(self) -> None:
         """Schedule periodic NSFW cache saves."""
@@ -384,13 +384,22 @@ class ProductivityApp:
         except Exception as e:
             print(f"[NSFW] Error saving cache: {e}")
 
-    def _on_adult_strike(self) -> dict:
-        """Handle adult site visit attempt - called by extension server."""
+    def _on_adult_strike(self, domain: str = "") -> dict:
+        """Handle adult site visit attempt - show popup and add strike."""
         new_count, triggered = self.internet_disabler.add_strike()
 
+        # Show strike popup on every violation (not just when punishment triggers)
+        self.root.after(0, lambda: NSFWStrikePopup(
+            parent=self.root,
+            strike_count=new_count,
+            max_strikes=self.config.max_adult_strikes,
+            punishment_hours=self.config.punishment_hours,
+            domain=domain,
+        ))
+
         if triggered:
-            # Punishment was triggered - show notification on main thread
-            self.root.after(0, self._show_punishment_notification)
+            # Punishment was triggered - also show the internet disabled notification
+            self.root.after(500, self._show_punishment_notification)
 
         return self._get_punishment_state()
 
