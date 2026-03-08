@@ -28,7 +28,6 @@ class TrayIcon:
         on_pause: Callable,
         on_stop: Callable,
         on_settings: Callable,
-        on_exit: Callable,
     ):
         """
         Initialize the tray icon.
@@ -39,14 +38,12 @@ class TrayIcon:
             on_pause: Callback to pause timer
             on_stop: Callback to stop timer
             on_settings: Callback to show settings
-            on_exit: Callback to exit application
         """
         self.on_show = on_show
         self.on_start = on_start
         self.on_pause = on_pause
         self.on_stop = on_stop
         self.on_settings = on_settings
-        self.on_exit = on_exit
 
         self._icon: Optional[Icon] = None
         self._current_state = TimerState.IDLE
@@ -99,8 +96,6 @@ class TrayIcon:
             MenuItem("Stop Session", self._on_stop_click),
             Menu.SEPARATOR,
             MenuItem("Settings", self._on_settings_click),
-            Menu.SEPARATOR,
-            MenuItem("Exit", self._on_exit_click),
         )
 
         self._icon = Icon(
@@ -129,12 +124,6 @@ class TrayIcon:
     def _on_settings_click(self, icon, item) -> None:
         """Handle Settings click."""
         self.on_settings()
-
-    def _on_exit_click(self, icon, item) -> None:
-        """Handle Exit click."""
-        # Don't stop here - let the app decide if exit is allowed
-        # The app will call stop() when actually exiting
-        self.on_exit()
 
     def start(self) -> None:
         """Start the tray icon in a background thread."""
