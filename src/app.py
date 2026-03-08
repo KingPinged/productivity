@@ -153,7 +153,6 @@ class ProductivityApp:
             on_pause=self._on_pause,
             on_stop=self._on_stop,
             on_settings=self._on_settings,
-            on_exit=self._on_exit_request,
         )
 
         if self.tray_icon.is_available():
@@ -701,72 +700,10 @@ class ProductivityApp:
         self.root.after(0, self.main_window.show)
 
     def _on_close(self) -> None:
-        """Handle window close - minimize to tray or block during session."""
-        # During active session (sets not complete), only allow minimize to tray
-        if self._session_active:
-            if self.tray_icon.is_available():
-                self.main_window.hide()
-            # If no tray, just ignore the close - can't escape that easily!
-            return
-
-        # During work session (but sets complete), still minimize
-        if self.timer.state == TimerState.WORKING:
-            if self.tray_icon.is_available():
-                self.main_window.hide()
-            return
-
+        """Handle window close - always minimize to tray."""
         if self.tray_icon.is_available():
             self.main_window.hide()
-        else:
-            self._on_exit()
-
-    def _on_exit_request(self) -> None:
-        """Handle exit request - requires challenge during work session."""
-        # Schedule on main thread since this may be called from tray thread
-        # Tkinter is not thread-safe
-        self.root.after(0, self._handle_exit_request)
-
-    def _handle_exit_request(self) -> None:
-        """Handle exit request on main thread."""
-        # If sets session is active, require challenge to exit
-        if self._session_active:
-            remaining = self.config.sets_per_session - self._sets_completed
-            self.main_window.show()
-
-            # Show warning about incomplete sets
-            result = messagebox.askyesno(
-                "Session In Progress",
-                f"You have {remaining} set(s) remaining!\n\n"
-                f"Completed: {self._sets_completed}/{self.config.sets_per_session}\n\n"
-                "Do you really want to quit? You'll need to complete a typing challenge.",
-                icon='warning'
-            )
-
-            if result:
-                self._show_exit_challenge()
-            return
-
-        # Not in a session - allow normal exit
-        if self.timer.state == TimerState.WORKING and self.disable_guard.is_session_active():
-            # Show the window so user can see the challenge
-            self.main_window.show()
-            self._show_exit_challenge()
-        else:
-            self._on_exit()
-
-    def _show_exit_challenge(self) -> None:
-        """Show the exit challenge dialog."""
-        cooldown_remaining = self.disable_guard.get_cooldown_remaining()
-        challenge_text = self.disable_guard.generate_challenge_text()
-
-        TypingChallengeDialog(
-            parent=self.root,
-            challenge_text=challenge_text,
-            cooldown_remaining=cooldown_remaining,
-            on_complete=self._on_exit,
-            on_cancel=lambda: None,  # Do nothing on cancel
-            on_cooldown_disable=self._on_exit if cooldown_remaining == 0 else lambda: None,
-        )
+        # If no tray available, just ignore the close request
 
     def _on_exit(self) -> None:
         """Handle application exit."""
