@@ -18,8 +18,24 @@ from src.data.config import Config
 from src.app import ProductivityApp
 
 
+def _acquire_single_instance_lock():
+    """Ensure only one instance of the app runs. Returns lock handle or exits."""
+    import ctypes
+    mutex_name = "ProductivityTimer_SingleInstance_Mutex"
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, True, mutex_name)
+    ERROR_ALREADY_EXISTS = 183
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        print("Another instance is already running. Exiting.")
+        sys.exit(0)
+    return handle
+
+
 def main():
     """Main entry point."""
+    # Ensure single instance
+    _lock = _acquire_single_instance_lock()
+
     # Check for admin privileges
     has_admin = is_admin()
 

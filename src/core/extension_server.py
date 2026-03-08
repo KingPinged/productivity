@@ -307,7 +307,7 @@ class ExtensionServer:
         for port in ports_to_try:
             try:
                 server = HTTPServer(('127.0.0.1', port), ExtensionRequestHandler)
-                server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                # Do NOT use SO_REUSEADDR on Windows - it allows port stealing by duplicate instances
                 self._server = server
                 self.port = port
                 break
@@ -316,7 +316,7 @@ class ExtensionServer:
                 self._kill_stale_server(port)
                 try:
                     server = HTTPServer(('127.0.0.1', port), ExtensionRequestHandler)
-                    server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    # Do NOT use SO_REUSEADDR on Windows - it allows port stealing by duplicate instances
                     self._server = server
                     self.port = port
                     break
