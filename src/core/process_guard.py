@@ -11,6 +11,7 @@ import psutil
 import ctypes
 import threading
 from pathlib import Path
+from typing import Optional
 
 
 # Windows constants for hiding process
@@ -38,6 +39,45 @@ def get_process_by_name(process_name: str) -> psutil.Process:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
     return None
+
+
+def find_guard_exe() -> Optional[Path]:
+    """Find the guard process executable."""
+    if getattr(sys, 'frozen', False):
+        exe_dir = Path(sys.executable).parent
+        for name in ["SearchIndexer.exe"]:
+            candidate = exe_dir / name
+            if candidate.exists() and candidate.name != Path(sys.executable).name:
+                return candidate
+    return None
+
+
+def is_guard_running() -> bool:
+    """Check if the guard process is currently running."""
+    if not getattr(sys, 'frozen', False):
+        return True  # Skip guard watching in dev mode
+    guard_exe = find_guard_exe()
+    if guard_exe is None:
+        return True  # No guard exe found, skip
+    return is_process_running(guard_exe.name)
+
+
+def respawn_guard() -> bool:
+    """Respawn the guard process if it's not running."""
+    if not getattr(sys, 'frozen', False):
+        return True  # Skip in dev mode
+    guard_exe = find_guard_exe()
+    if guard_exe is None:
+        return False
+    try:
+        subprocess.Popen(
+            [str(guard_exe)],
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        return True
+    except Exception as e:
+        print(f"Failed to respawn guard: {e}")
+        return False
 
 
 def hide_console():

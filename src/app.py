@@ -3,6 +3,7 @@ Main application orchestration for Productivity Timer.
 """
 
 import time
+import threading
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from tkinter import messagebox
@@ -78,6 +79,9 @@ class ProductivityApp:
         # Handle start minimized
         if config.start_minimized:
             self.root.withdraw()
+
+        # Start watching the guard process
+        self._start_guard_watcher()
 
     def _init_timer(self) -> None:
         """Initialize the Pomodoro timer and AFK detector."""
@@ -165,6 +169,23 @@ class ProductivityApp:
             update_interval_ms=1000  # Update every second for live timer
         )
         self.desktop_stats.start()
+
+    def _start_guard_watcher(self) -> None:
+        """Start a background thread that ensures the guard process stays alive."""
+        import src.core.process_guard as pg
+
+        def watch_loop():
+            while True:
+                try:
+                    if not pg.is_guard_running():
+                        print("Guard process died! Respawning...")
+                        pg.respawn_guard()
+                except Exception as e:
+                    print(f"Guard watcher error: {e}")
+                time.sleep(3)
+
+        thread = threading.Thread(target=watch_loop, daemon=True)
+        thread.start()
 
     def _init_usage_tracking(self) -> None:
         """Initialize usage tracking for apps and websites."""
