@@ -72,8 +72,10 @@ bucket.add_time(earned)
 
 - Hooks into existing `on_session_complete` callback in `app.py`, alongside `config.increment_cycle()`
 - AFK-paused time does not count (timer already tracks only active work time)
-- Early stop (manual stop during WORKING) earns proportional credit for time worked. Implementation note: elapsed time must be captured *before* `timer.stop()` is called, since `stop()` resets `_time_remaining`. Use `elapsed = timer.work_seconds - timer.time_remaining` before calling stop.
+- Early stop (manual stop during WORKING) earns proportional credit for time worked. This must be handled in `_do_stop()` (not `on_session_complete`, which only fires on natural completion). In `_do_stop`, before calling `timer.stop()`, compute `elapsed = timer.work_seconds - timer.time_remaining` and call `bucket.add_time(elapsed * config.free_time_ratio)` if the timer was in WORKING state. `timer.stop()` resets `_time_remaining`, so capture must happen first.
+- Ratio changes only affect future earnings — existing balance is never retroactively recalculated
 - Feature toggled off: no accumulation, but existing balance preserved
+- Settings changes while IDLE do not retroactively re-evaluate blocking state. User must earn time via pomodoros to unblock.
 
 ## Draining Logic
 
@@ -81,8 +83,8 @@ During IDLE state, the bucket drains only when using blocklisted apps/websites:
 
 ### App detection
 
-The existing `UsageTracker` polls the active process every 1 second. Extended check:
-- If active process is in blocklist AND timer is IDLE AND feature enabled AND bucket has balance:
+The existing `UsageTracker` polls the active process every 1 second and calls `_on_usage_tick(app_name, 'app', 1)` in `app.py`. This callback already has access to `self.timer`, `self.config`, and can access the bucket. Add the drain check inside `_on_usage_tick`:
+- If `category == 'app'` AND timer is IDLE AND feature enabled AND `name` is in `config.get_all_blocked_apps()` AND bucket has balance:
   - `bucket.drain(1)` — subtract 1 second
 
 ### Website detection
@@ -99,8 +101,8 @@ The browser extension reports active website usage via extension server callback
 
 ### Website draining detail
 
-The existing `_on_website_usage` callback in `app.py` receives `(domain, seconds)` from the extension's POST to `/usage/website`. This callback fires for all websites. To integrate draining:
-- Inside the existing callback, add a check: if timer is IDLE AND feature enabled AND domain is in `config.get_all_blocked_websites()`, call `bucket.drain(seconds)`.
+The existing `_on_website_usage` callback in `app.py` has signature `(category, name, seconds)` where `name` is the domain. The extension server calls it as `callback('website', domain, seconds)`. To integrate draining:
+- Inside `_on_website_usage`, add a check: if timer is IDLE AND feature enabled AND `name` (the domain) is in `config.get_all_blocked_websites()`, call `bucket.drain(seconds)`.
 - This reuses the existing extension reporting mechanism — no new endpoints needed.
 
 ### Not draining when
@@ -136,7 +138,7 @@ Is timer IDLE?
 - **ExtensionServer**: Sync blocking state to browser extension when bucket state changes.
 - **ExtensionServer protocol**: No new endpoints needed. The existing `is_blocking` boolean is set to `true` when bucket empties during IDLE (same as during WORKING). The extension does not need to distinguish between work-blocking and bucket-empty-blocking — the effect is the same.
 - **`app.py` `_start_blocking()` / `_stop_blocking()`**: New trigger path — bucket exhausted during IDLE triggers `_start_blocking()`. Starting a pomodoro also triggers `_start_blocking()` (existing). Transitioning to BREAK or IDLE-with-balance triggers `_stop_blocking()`.
-- **Bucket-empty blocking responsiveness**: When `bucket.drain()` causes balance to hit 0, it should immediately call a callback (e.g. `on_bucket_empty`) that triggers `_start_blocking()`. Do not wait for the next ProcessBlocker cycle.
+- **Bucket-empty blocking responsiveness**: When `bucket.drain()` causes balance to hit 0, it should immediately call a callback (e.g. `on_bucket_empty`) that triggers `_start_blocking()`. Do not wait for the next ProcessBlocker cycle. Since `drain()` is called from background threads (UsageTracker, HTTP server), the callback must be dispatched to the main thread via `root.after(0, callback)` to avoid race conditions with tkinter — following the existing pattern used by `_on_adult_strike` and `_on_timer_tick`.
 - **Break time**: Never affected. During BREAK, blocklist items always unblocked regardless of bucket balance.
 
 ## UI
