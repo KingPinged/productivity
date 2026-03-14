@@ -12,6 +12,7 @@ from src.utils.constants import (
     CONFIG_FILE,
     DEFAULT_WORK_MINUTES,
     DEFAULT_BREAK_MINUTES,
+    DEFAULT_LONG_BREAK_MINUTES,
     DEFAULT_SETS_PER_SESSION,
     DEFAULT_COOLDOWN_MINUTES,
     DEFAULT_TYPING_CHALLENGE_LENGTH,
@@ -19,6 +20,7 @@ from src.utils.constants import (
     DEFAULT_MAX_ADULT_STRIKES,
     DEFAULT_PUNISHMENT_HOURS,
     DEFAULT_THEME,
+    DEFAULT_FREE_TIME_RATIO,
 )
 
 
@@ -29,6 +31,7 @@ class Config:
     # Timer settings
     work_minutes: int = DEFAULT_WORK_MINUTES
     break_minutes: int = DEFAULT_BREAK_MINUTES
+    long_break_minutes: int = DEFAULT_LONG_BREAK_MINUTES  # Long break after completing all sets
     sets_per_session: int = DEFAULT_SETS_PER_SESSION  # Work sessions to complete before app can close
 
     # Blocking settings - enabled categories
@@ -63,6 +66,10 @@ class Config:
     # AI NSFW detection settings
     ai_nsfw_detection_enabled: bool = True
     openai_api_key: str = ""
+
+    # Free time bucket settings
+    free_time_bucket_enabled: bool = False
+    free_time_ratio: float = DEFAULT_FREE_TIME_RATIO  # free minutes per work minute
 
     # UI settings
     theme: str = DEFAULT_THEME
@@ -178,11 +185,15 @@ class Config:
 
     @classmethod
     def load(cls) -> 'Config':
-        """Load configuration from file, or create default if not exists."""
+        """Load configuration from file, or create default if not exists.
+        Always applies updated defaults for fields that should track code changes."""
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE, 'r') as f:
                     data = json.load(f)
+                # Always use the code default for max_adult_strikes
+                # so changing the constant takes effect immediately
+                data['max_adult_strikes'] = DEFAULT_MAX_ADULT_STRIKES
                 return cls(**data)
             except (json.JSONDecodeError, TypeError):
                 # Invalid config, return default
