@@ -497,7 +497,13 @@ class ProductivityApp:
         elif new_state == TimerState.BREAK:
             self._stop_blocking()
         elif new_state == TimerState.IDLE:
-            self._stop_blocking()
+            # If bucket feature is enabled and bucket is empty, keep blocking
+            if (self.config.free_time_bucket_enabled
+                    and not self.free_time_bucket.has_time()):
+                # Stay blocked — don't call _stop_blocking
+                pass
+            else:
+                self._stop_blocking()
             self.disable_guard.end_session()
 
     def _on_session_complete(self, completed_state: str) -> None:
