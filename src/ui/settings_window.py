@@ -64,9 +64,29 @@ class SettingsWindow:
         # Handle window close button (X)
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Main container
-        main_frame = ttk.Frame(self.dialog, padding=20)
-        main_frame.pack(fill=BOTH, expand=YES)
+        # Outer container holds scrollable area + fixed buttons
+        outer_frame = ttk.Frame(self.dialog)
+        outer_frame.pack(fill=BOTH, expand=YES)
+
+        # Scrollable area
+        self._canvas = ttk.Canvas(outer_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(outer_frame, orient=VERTICAL, command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=RIGHT, fill=Y)
+        self._canvas.pack(side=LEFT, fill=BOTH, expand=YES)
+
+        # Inner frame for all settings content
+        main_frame = ttk.Frame(self._canvas, padding=20)
+        self._canvas_window = self._canvas.create_window((0, 0), window=main_frame, anchor=NW)
+
+        # Update scroll region when content changes size
+        main_frame.bind("<Configure>", lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        # Stretch inner frame to canvas width
+        self._canvas.bind("<Configure>", lambda e: self._canvas.itemconfig(self._canvas_window, width=e.width))
+
+        # Enable mousewheel scrolling
+        self._bind_mousewheel()
 
         # Timer Settings Section
         timer_label = ttk.Label(
@@ -313,9 +333,12 @@ class SettingsWindow:
         )
         bucket_help.pack(anchor=W, pady=(5, 0))
 
-        # Buttons
-        buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.pack(fill=X, pady=(20, 0))
+        # Buttons — fixed at bottom, outside scrollable area
+        buttons_frame = ttk.Frame(outer_frame, padding=(20, 10))
+        buttons_frame.pack(side=BOTTOM, fill=X)
+
+        # Separator above buttons
+        ttk.Separator(outer_frame, orient=HORIZONTAL).pack(side=BOTTOM, fill=X)
 
         cancel_btn = ttk.Button(
             buttons_frame,
@@ -338,17 +361,36 @@ class SettingsWindow:
         # Finalize dialog - MUST be done AFTER all widgets are created
         self.dialog.update_idletasks()
 
-        # Set size and center on parent
+        # Set size and center on parent — cap height to screen
         width = 450
-        height = 960  # Increased for free time bucket section
+        screen_h = self.dialog.winfo_screenheight()
+        height = min(960, screen_h - 100)
         x = self.parent.winfo_x() + (self.parent.winfo_width() - width) // 2
         y = self.parent.winfo_y() + (self.parent.winfo_height() - height) // 2
+        y = max(20, y)  # Don't go off top of screen
         self.dialog.geometry(f"{width}x{height}+{x}+{y}")
 
         # Make modal
         self.dialog.transient(self.parent)
         self.dialog.grab_set()
         self.dialog.focus_set()
+
+    def _bind_mousewheel(self) -> None:
+        """Bind mousewheel scrolling to the canvas."""
+        def _on_mousewheel(event):
+            # Windows: event.delta is ±120 per notch
+            # macOS: event.delta is ±1 per notch
+            import sys
+            if sys.platform == 'darwin':
+                self._canvas.yview_scroll(-event.delta, "units")
+            else:
+                self._canvas.yview_scroll(-event.delta // 120, "units")
+
+        # Bind to dialog so scrolling works anywhere in the window
+        self.dialog.bind("<MouseWheel>", _on_mousewheel)
+        # Linux
+        self.dialog.bind("<Button-4>", lambda e: self._canvas.yview_scroll(-1, "units"))
+        self.dialog.bind("<Button-5>", lambda e: self._canvas.yview_scroll(1, "units"))
 
     def _get_current_values(self) -> dict:
         """Get current values from UI widgets."""

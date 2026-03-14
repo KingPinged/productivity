@@ -252,6 +252,7 @@ class ProductivityApp:
             on_stop=self._on_stop,
             on_settings=self._on_settings,
             on_exit=self._on_exit_request,
+            root=self.root,
         )
 
         if self.tray_icon.is_available():

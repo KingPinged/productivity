@@ -43,6 +43,7 @@ class TrayIcon:
         on_stop: Callable,
         on_settings: Callable,
         on_exit: Callable,
+        root=None,
     ):
         self.on_show = on_show
         self.on_start = on_start
@@ -50,6 +51,7 @@ class TrayIcon:
         self.on_stop = on_stop
         self.on_settings = on_settings
         self.on_exit = on_exit
+        self._root = root  # tkinter root for dispatching callbacks safely
 
         self._status_item = None
         self._current_state = TimerState.IDLE
@@ -86,6 +88,7 @@ class TrayIcon:
             return None
         target = _CallbackTarget.alloc().init()
         target._callback = callback
+        target._root = self._root  # pass root for thread-safe dispatch
         _menu_targets.append(target)  # prevent GC
 
         mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -185,9 +188,14 @@ if APPKIT_AVAILABLE:
         """Bridging object: receives Cocoa menu actions, calls Python callbacks."""
 
         _callback = None
+        _root = None
 
         def handleAction_(self, sender):
             if self._callback:
-                # Callbacks are already wrapped with root.after(0, ...) in app.py,
-                # so they're safe to call from any thread.
-                self._callback()
+                # Dispatch through root.after to ensure tkinter thread safety.
+                # Cocoa menu callbacks run from the NSRunLoop which can interrupt
+                # tkinter's event processing, causing crashes.
+                if self._root:
+                    self._root.after(0, self._callback)
+                else:
+                    self._callback()
