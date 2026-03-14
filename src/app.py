@@ -33,6 +33,8 @@ from src.ui.tray_icon import TrayIcon
 from src.ui.desktop_stats import DesktopStatsWidget, StatsData
 from src.ui.usage_stats_window import UsageStatsWindow
 from src.ui.nsfw_popup import NSFWStrikePopup
+from src.ui.toast import TimerToastManager, Toast
+from src.core.free_time_bucket import FreeTimeBucket
 
 
 class ProductivityApp:
@@ -81,6 +83,19 @@ class ProductivityApp:
         if config.start_minimized:
             self.root.withdraw()
 
+        # Initialize free time bucket
+        self.free_time_bucket = FreeTimeBucket.load(
+            on_bucket_empty=lambda: self.root.after(0, self._on_bucket_empty),
+            on_warning=lambda: self.root.after(0, self._on_bucket_warning),
+            on_time_earned=lambda secs: self.root.after(0, lambda s=secs: self._on_time_earned(s)),
+        )
+        self._schedule_bucket_save()
+
+        # If bucket feature is enabled and bucket is empty at startup, activate blocking
+        if (self.config.free_time_bucket_enabled
+                and not self.free_time_bucket.has_time()):
+            self.root.after(500, self._start_blocking)
+
         # Start watching the guard process
         self._start_guard_watcher()
 
@@ -100,6 +115,8 @@ class ProductivityApp:
             on_session_complete=self._on_session_complete,
             afk_check=self.afk_detector.is_afk,  # Seamless AFK detection
         )
+
+        self.toast_manager = TimerToastManager(self.root)
 
         self.disable_guard = DisableGuard(
             cooldown_seconds=self.config.cooldown_minutes * 60,
@@ -172,18 +189,16 @@ class ProductivityApp:
         self.desktop_stats.start()
 
     def _start_guard_watcher(self) -> None:
-        """Start a background thread that ensures the guard process stays alive."""
+        """Start a background thread that ensures all guard processes stay alive."""
         import src.core.process_guard as pg
 
         def watch_loop():
             while True:
                 try:
-                    if not pg.is_guard_running():
-                        print("Guard process died! Respawning...")
-                        pg.respawn_guard()
+                    pg.check_and_respawn_guards()
                 except Exception as e:
                     print(f"Guard watcher error: {e}")
-                time.sleep(3)
+                time.sleep(10)
 
         thread = threading.Thread(target=watch_loop, daemon=True)
         thread.start()
@@ -225,6 +240,12 @@ class ProductivityApp:
         self._save_usage_data_sync()
         # Schedule next save in 60 seconds
         self.root.after(60000, self._schedule_usage_save)
+
+    def _schedule_bucket_save(self) -> None:
+        """Schedule periodic free time bucket saves."""
+        if self.free_time_bucket.is_dirty():
+            self.free_time_bucket.save()
+        self.root.after(60000, self._schedule_bucket_save)
 
     def _save_usage_data_sync(self) -> None:
         """Save usage data synchronously (called by atexit and periodic save)."""
@@ -422,15 +443,22 @@ class ProductivityApp:
         # Use after() to update UI from timer thread
         self.root.after(0, lambda: self.main_window.update_timer(seconds_remaining))
 
+        # Check for milestone toast notifications
+        state = self.timer.state
+        self.root.after(
+            0,
+            lambda r=seconds_remaining, s=state: self.toast_manager.check(r, s)
+        )
+
         # Update tray tooltip with timer and cycle count
         minutes = seconds_remaining // 60
         secs = seconds_remaining % 60
-        state = self.timer.state.upper()
+        state_upper = state.upper()
         cycles_today = self.config.get_cycles_today()
         # Capture values in lambda defaults to avoid closure issues
         self.root.after(
             0,
-            lambda s=state, m=minutes, sc=secs, c=cycles_today: self.tray_icon.update_tooltip(
+            lambda s=state_upper, m=minutes, sc=secs, c=cycles_today: self.tray_icon.update_tooltip(
                 f"{s} - {m:02d}:{sc:02d} | Cycles: {c}"
             )
         )
@@ -439,6 +467,14 @@ class ProductivityApp:
         """Handle timer state change."""
         self.root.after(0, lambda: self.main_window.update_state(new_state))
         self.root.after(0, lambda: self.tray_icon.update_state(new_state))
+
+        # Reset toast milestones and set duration for the new session
+        self.toast_manager.reset()
+        if new_state == TimerState.WORKING:
+            self.toast_manager.set_total(self.timer.work_seconds)
+        elif new_state == TimerState.BREAK:
+            # Use actual remaining time (could be long break override)
+            self.toast_manager.set_total(self.timer.time_remaining)
 
         # Start/stop blocking based on state
         if new_state == TimerState.WORKING:
@@ -454,6 +490,12 @@ class ProductivityApp:
         if completed_state == TimerState.WORKING:
             # Work session ended - increment cycle count
             self.config.increment_cycle()
+
+            # Earn free time if bucket feature is enabled
+            if self.config.free_time_bucket_enabled:
+                earned = self.config.work_minutes * 60 * self.config.free_time_ratio
+                self.free_time_bucket.add_time(earned)
+
             self.root.after(0, self._update_cycle_display)
 
             # Increment sets completed
@@ -464,6 +506,9 @@ class ProductivityApp:
             # Check if all sets completed
             if self._sets_completed >= self.config.sets_per_session:
                 self._session_active = False
+                # Trigger long break instead of regular break
+                long_break_secs = self.config.long_break_minutes * 60
+                self.timer.set_next_break_duration(long_break_secs)
                 self.root.after(0, lambda: self._show_sets_complete_notification())
             else:
                 # Notify user
@@ -498,6 +543,7 @@ class ProductivityApp:
         messagebox.showinfo(
             "Session Complete!",
             f"Congratulations! You completed all {self.config.sets_per_session} sets!\n\n"
+            f"Enjoy your {self.config.long_break_minutes}-minute long break.\n"
             "You are now free to close the app or start another session."
         )
         # Reset sets display
@@ -630,6 +676,13 @@ class ProductivityApp:
 
     def _do_stop(self) -> None:
         """Actually stop the timer and blocking."""
+        # Capture elapsed work time before stop() resets _time_remaining
+        if self.timer.state == TimerState.WORKING and self.config.free_time_bucket_enabled:
+            elapsed = self.timer.work_seconds - self.timer.time_remaining
+            if elapsed > 0:
+                earned = elapsed * self.config.free_time_ratio
+                self.free_time_bucket.add_time(earned)
+
         self.timer.stop()
         self._stop_blocking()
         self.disable_guard.end_session()
@@ -754,12 +807,35 @@ class ProductivityApp:
         if hasattr(self, 'nsfw_cache'):
             self.nsfw_cache.save()
 
+        # Save free time bucket
+        self.free_time_bucket.save()
+
         # Cleanup punishment system (but DON'T restore network if locked - punishment continues!)
         self.internet_disabler.cleanup()
 
         # Destroy window
         self.root.quit()
         self.root.destroy()
+
+    def _on_bucket_empty(self) -> None:
+        """Handle bucket draining to zero — activate blocking during IDLE."""
+        if self.timer.state == TimerState.IDLE:
+            self._start_blocking()
+            Toast(self.root, "Free time used up - blocked apps/sites are now blocked",
+                  accent="#e94560")
+
+    def _on_bucket_warning(self) -> None:
+        """Handle bucket approaching zero — show warning toast."""
+        if self.timer.state == TimerState.IDLE:
+            Toast(self.root, "2 minutes of free time remaining",
+                  accent="#f0ad4e")
+
+    def _on_time_earned(self, seconds: float) -> None:
+        """Handle time earned — show notification and update display."""
+        minutes = int(seconds / 60)
+        Toast(self.root, f"Earned {minutes} minutes of free time!",
+              accent="#0f9b58")
+        self._update_bucket_display()
 
     def run(self) -> None:
         """Run the application main loop."""
