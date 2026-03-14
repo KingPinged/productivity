@@ -382,15 +382,52 @@ function startBlocking() {
     browser.webRequest.onBeforeRequest.removeListener(blockRequest);
   }
 
-  // Add listener
+  // Add listener for new navigations
   browser.webRequest.onBeforeRequest.addListener(
     blockRequest,
     { urls: ["<all_urls>"], types: ["main_frame"] },
     ["blocking"]
   );
 
+  // Start watching for SPA/client-side navigations (History API URL changes)
+  startTabUrlWatcher();
+
+  // Block any tabs already open on blocked sites
+  blockExistingTabs();
+
   console.log("Productivity Timer: Session blocking started");
   console.log("Whitelisted URLs:", whitelistedUrls);
+}
+
+// Scan all open tabs and redirect any that are on blocked sites
+async function blockExistingTabs() {
+  try {
+    const pattern = buildBlockPattern();
+    if (!pattern) return;
+
+    const tabs = await browser.tabs.query({});
+    for (const tab of tabs) {
+      if (!tab.url || tab.url.startsWith('about:') || tab.url.startsWith('moz-extension:') ||
+          tab.url.startsWith('chrome-extension:') || tab.url.startsWith('chrome:') ||
+          tab.url.startsWith('edge:')) {
+        continue;
+      }
+
+      // Skip whitelisted URLs
+      if (isWhitelisted(tab.url)) continue;
+
+      if (pattern.test(tab.url)) {
+        blockCount++;
+        console.log('Blocking existing tab:', tab.url);
+        browser.tabs.update(tab.id, {
+          url: browser.runtime.getURL('blocked.html') + '?url=' + encodeURIComponent(tab.url)
+        });
+      }
+    }
+    browser.storage.local.set({ blockCount });
+  } catch (error) {
+    console.log('Error blocking existing tabs:', error);
+  }
 }
 
 // Stop blocking
@@ -399,7 +436,60 @@ function stopBlocking() {
     browser.webRequest.onBeforeRequest.removeListener(blockRequest);
   }
 
+  stopTabUrlWatcher();
+
   console.log("Productivity Timer: Blocking stopped");
+}
+
+// ============================================
+// Tab URL Watcher - catches SPA navigations
+// ============================================
+// SPAs like YouTube use the History API to change URLs without a real page load,
+// so webRequest.onBeforeRequest never fires. This watcher catches those changes.
+
+let tabUrlWatcherActive = false;
+
+function onTabUpdatedForBlocking(tabId, changeInfo, tab) {
+  // changeInfo.url fires when the tab URL changes (including History API pushState)
+  if (!changeInfo.url) return;
+  if (!isBlocking) return;
+
+  const url = changeInfo.url;
+
+  // Skip internal pages
+  if (url.startsWith('about:') || url.startsWith('moz-extension:') ||
+      url.startsWith('chrome-extension:') || url.startsWith('chrome:') ||
+      url.startsWith('edge:')) {
+    return;
+  }
+
+  // Skip whitelisted
+  if (isWhitelisted(url)) return;
+
+  // Check against blocklist
+  const pattern = buildBlockPattern();
+  if (pattern && pattern.test(url)) {
+    blockCount++;
+    browser.storage.local.set({ blockCount });
+    console.log('Blocked SPA navigation:', url);
+    browser.tabs.update(tabId, {
+      url: browser.runtime.getURL('blocked.html') + '?url=' + encodeURIComponent(url)
+    });
+  }
+}
+
+function startTabUrlWatcher() {
+  if (tabUrlWatcherActive) return;
+  tabUrlWatcherActive = true;
+  browser.tabs.onUpdated.addListener(onTabUpdatedForBlocking);
+  console.log("Tab URL watcher started");
+}
+
+function stopTabUrlWatcher() {
+  if (!tabUrlWatcherActive) return;
+  tabUrlWatcherActive = false;
+  browser.tabs.onUpdated.removeListener(onTabUpdatedForBlocking);
+  console.log("Tab URL watcher stopped");
 }
 
 // Request listener for punishment mode - blocks ALL websites
@@ -683,8 +773,9 @@ async function checkPageContent(tabId, url, domain) {
           url: browser.runtime.getURL('blocked.html') + '?url=' + encodeURIComponent(url) + '&adult=1&ai=1'
         });
 
-        // Report adult strike
-        reportAdultStrike();
+        // NOTE: Do NOT call reportAdultStrike() here — the backend already
+        // fires a strike via the on_nsfw_detected callback when /check-content
+        // returns is_nsfw=true. Calling it here would cause a double strike.
       }
     } else {
       console.log(`[AI NSFW] Backend returned HTTP ${response.status} for ${domain}`);

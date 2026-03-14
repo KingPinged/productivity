@@ -291,7 +291,9 @@ ADULT_SITES = [
     "www.91porn.com",
     "www.jennymovies.com",
     "xnxx.health",
-    "www.xnxx.health"
+    "www.xnxx.health",
+    "https://njavtv.com",
+    "njavtv.com"
     
 
     # ============================================

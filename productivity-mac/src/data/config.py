@@ -12,6 +12,7 @@ from src.utils.constants import (
     CONFIG_FILE,
     DEFAULT_WORK_MINUTES,
     DEFAULT_BREAK_MINUTES,
+    DEFAULT_LONG_BREAK_MINUTES,
     DEFAULT_SETS_PER_SESSION,
     DEFAULT_COOLDOWN_MINUTES,
     DEFAULT_TYPING_CHALLENGE_LENGTH,
@@ -19,6 +20,7 @@ from src.utils.constants import (
     DEFAULT_MAX_ADULT_STRIKES,
     DEFAULT_PUNISHMENT_HOURS,
     DEFAULT_THEME,
+    DEFAULT_FREE_TIME_RATIO,
 )
 
 
@@ -29,6 +31,7 @@ class Config:
     # Timer settings
     work_minutes: int = DEFAULT_WORK_MINUTES
     break_minutes: int = DEFAULT_BREAK_MINUTES
+    long_break_minutes: int = DEFAULT_LONG_BREAK_MINUTES
     sets_per_session: int = DEFAULT_SETS_PER_SESSION  # Work sessions to complete before app can close
 
     # Blocking settings - enabled categories
@@ -63,6 +66,10 @@ class Config:
     # AI NSFW detection settings
     ai_nsfw_detection_enabled: bool = True
     openai_api_key: str = ""
+
+    # Free time bucket settings
+    free_time_bucket_enabled: bool = False
+    free_time_ratio: float = DEFAULT_FREE_TIME_RATIO
 
     # UI settings
     theme: str = DEFAULT_THEME

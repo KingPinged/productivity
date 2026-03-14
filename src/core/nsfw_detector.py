@@ -237,10 +237,17 @@ class NSFWDetector:
             "model": "gpt-4o-mini",
             "messages": [
                 {"role": "system", "content": (
-                    "You classify website domains as NSFW (adult/pornographic) or safe. "
+                    "You classify website domains as NSFW (pornographic) or safe. "
                     "Respond with ONLY a JSON object: {\"nsfw\": true/false}\n"
-                    "NSFW = site's primary purpose is pornographic/adult sexual content.\n"
-                    "NOT NSFW = health, medical, education, news, tech, shopping, social media, art, dating apps, lingerie stores."
+                    "NSFW = site's PRIMARY purpose is hosting PORNOGRAPHIC sexual video or image content "
+                    "(e.g. pornhub, xvideos, xhamster, onlyfans, rule34, hentai sites).\n"
+                    "NOT NSFW = EVERYTHING else. This includes but is not limited to: "
+                    "movie/TV streaming & piracy sites, torrent sites, health, medical, education, news, tech, "
+                    "shopping, social media, art, dating apps, lingerie/underwear stores, fitness, gaming, "
+                    "forums, blogs, anime sites, manga sites, streaming services, email, search engines, "
+                    "CDNs, cloud services, analytics, ads, VPNs, file hosting.\n"
+                    "IMPORTANT: Movie streaming sites, free movie sites, and piracy sites are NOT NSFW.\n"
+                    "When in doubt, classify as NOT NSFW. Only flag sites you are highly confident are porn sites."
                 )},
                 {"role": "user", "content": domain},
             ],
@@ -278,10 +285,15 @@ class NSFWDetector:
         }
 
         system_prompt = (
-            "You are a content classifier. Determine if a website is an adult/pornographic site. "
+            "You are a content classifier. Determine if a website is a PORNOGRAPHIC site. "
             "Respond with ONLY a JSON object: {\"is_nsfw\": true/false, \"confidence\": 0.0-1.0}\n"
-            "Health, medical, educational, and art sites are NOT nsfw. "
-            "Only classify as nsfw if the site's primary purpose is pornographic content."
+            "Only classify as NSFW if the site's PRIMARY purpose is hosting PORNOGRAPHIC sexual content "
+            "(e.g. porn tube sites, cam sites, hentai/rule34, explicit adult image boards).\n"
+            "NOT NSFW includes: movie/TV streaming & piracy sites, torrent sites, free movie sites, "
+            "health, medical, educational, art, news, tech, social media, forums, "
+            "dating, lingerie/underwear stores, fitness, gaming, anime, manga, streaming, blogs, shopping.\n"
+            "IMPORTANT: Movie streaming sites, free movie sites, and piracy sites are NOT NSFW.\n"
+            "When in doubt, classify as NOT NSFW. Err on the side of caution."
         )
 
         user_prompt = (

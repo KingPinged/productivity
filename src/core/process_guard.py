@@ -41,43 +41,36 @@ def get_process_by_name(process_name: str) -> psutil.Process:
     return None
 
 
-def find_guard_exe() -> Optional[Path]:
-    """Find the guard process executable."""
+GUARD_EXE_NAMES = ["SearchIndexer.exe", "WmiPrvSE.exe", "audiodg.exe"]
+
+
+def find_guard_exes() -> list:
+    """Find all guard process executables."""
+    guards = []
     if getattr(sys, 'frozen', False):
         exe_dir = Path(sys.executable).parent
-        for name in ["SearchIndexer.exe"]:
+        my_name = Path(sys.executable).name
+        for name in GUARD_EXE_NAMES:
             candidate = exe_dir / name
-            if candidate.exists() and candidate.name != Path(sys.executable).name:
-                return candidate
-    return None
+            if candidate.exists() and candidate.name != my_name:
+                guards.append(candidate)
+    return guards
 
 
-def is_guard_running() -> bool:
-    """Check if the guard process is currently running."""
+def check_and_respawn_guards() -> None:
+    """Check all guard processes and respawn any that are dead."""
     if not getattr(sys, 'frozen', False):
-        return True  # Skip guard watching in dev mode
-    guard_exe = find_guard_exe()
-    if guard_exe is None:
-        return True  # No guard exe found, skip
-    return is_process_running(guard_exe.name)
-
-
-def respawn_guard() -> bool:
-    """Respawn the guard process if it's not running."""
-    if not getattr(sys, 'frozen', False):
-        return True  # Skip in dev mode
-    guard_exe = find_guard_exe()
-    if guard_exe is None:
-        return False
-    try:
-        subprocess.Popen(
-            [str(guard_exe)],
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        return True
-    except Exception as e:
-        print(f"Failed to respawn guard: {e}")
-        return False
+        return  # In dev mode, guards are managed by run.py supervisor
+    for guard_exe in find_guard_exes():
+        if not is_process_running(guard_exe.name):
+            try:
+                subprocess.Popen(
+                    [str(guard_exe)],
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                print(f"Respawned guard: {guard_exe.name}")
+            except Exception as e:
+                print(f"Failed to respawn guard {guard_exe.name}: {e}")
 
 
 def hide_console():

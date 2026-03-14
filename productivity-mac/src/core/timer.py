@@ -47,6 +47,7 @@ class PomodoroTimer:
         self._state = TimerState.IDLE
         self._paused_from_state = TimerState.WORKING  # Track what state we paused from
         self._time_remaining = work_seconds
+        self._next_break_override: Optional[int] = None  # One-shot override for next break duration
         self._timer_thread: Optional[threading.Thread] = None
         self._running = False
         self._lock = threading.Lock()
@@ -194,11 +195,20 @@ class PomodoroTimer:
 
                     # Auto-transition to next session
                     if completed_state == TimerState.WORKING:
-                        self._time_remaining = self.break_seconds
+                        # Use override duration if set (e.g. long break), otherwise normal break
+                        if self._next_break_override is not None:
+                            self._time_remaining = self._next_break_override
+                            self._next_break_override = None
+                        else:
+                            self._time_remaining = self.break_seconds
                         self._set_state(TimerState.BREAK)
                     else:
                         self._time_remaining = self.work_seconds
                         self._set_state(TimerState.WORKING)
+
+    def set_next_break_duration(self, seconds: int) -> None:
+        """Override the duration of the next break (one-shot, resets after use)."""
+        self._next_break_override = seconds
 
     def update_durations(self, work_seconds: int, break_seconds: int) -> None:
         """Update timer durations (takes effect on next session)."""

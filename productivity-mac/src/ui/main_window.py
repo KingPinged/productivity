@@ -89,6 +89,15 @@ class MainWindow:
         )
         self.state_label.pack(pady=(5, 0))
 
+        # Free time bucket display (hidden by default)
+        self.free_time_label = ttk.Label(
+            timer_frame,
+            text="",
+            font=("Helvetica", 12),
+            bootstyle="info"
+        )
+        # Not packed initially — shown when feature is enabled
+
         # Cycle counter frame
         cycle_frame = ttk.Frame(self.main_frame)
         cycle_frame.pack(pady=(15, 5))
@@ -268,6 +277,16 @@ class MainWindow:
             self.stop_btn.config(state=NORMAL)
             self.settings_btn.config(state=DISABLED)
             self.blocklist_btn.config(state=DISABLED)
+
+    def update_free_time(self, text: str, visible: bool = True) -> None:
+        """Update the free time bucket display."""
+        if visible:
+            self.free_time_label.config(text=f"Free Time: {text}")
+            if not self.free_time_label.winfo_ismapped():
+                self.free_time_label.pack(pady=(5, 0))
+        else:
+            if self.free_time_label.winfo_ismapped():
+                self.free_time_label.pack_forget()
 
     def show(self) -> None:
         """Show the main window."""

@@ -39,6 +39,7 @@ class SettingsWindow:
         self._original_values = {
             'work_minutes': config.work_minutes,
             'break_minutes': config.break_minutes,
+            'long_break_minutes': config.long_break_minutes,
             'sets_per_session': config.sets_per_session,
             'cooldown_minutes': config.cooldown_minutes,
             'typing_challenge_length': config.typing_challenge_length,
@@ -46,6 +47,8 @@ class SettingsWindow:
             'auto_start': is_autostart_enabled(),
             'ai_nsfw_detection_enabled': config.ai_nsfw_detection_enabled,
             'openai_api_key': config.openai_api_key,
+            'free_time_bucket_enabled': config.free_time_bucket_enabled,
+            'free_time_ratio': config.free_time_ratio,
         }
 
         self._setup_dialog()
@@ -106,6 +109,21 @@ class SettingsWindow:
         )
         break_spin.pack(side=RIGHT)
 
+        # Long break duration
+        long_break_frame = ttk.Frame(timer_frame)
+        long_break_frame.pack(fill=X, pady=5)
+
+        ttk.Label(long_break_frame, text="Long Break Duration (minutes):").pack(side=LEFT)
+        self.long_break_var = ttk.IntVar(value=self.config.long_break_minutes)
+        long_break_spin = ttk.Spinbox(
+            long_break_frame,
+            from_=1,
+            to=120,
+            textvariable=self.long_break_var,
+            width=10
+        )
+        long_break_spin.pack(side=RIGHT)
+
         # Sets per session
         sets_frame = ttk.Frame(timer_frame)
         sets_frame.pack(fill=X, pady=5)
@@ -124,7 +142,7 @@ class SettingsWindow:
         # Sets description
         sets_desc = ttk.Label(
             timer_frame,
-            text="(Work sessions to complete before you can close the app)",
+            text="(Work sessions to complete before long break + app can close)",
             font=("Helvetica", 8),
             bootstyle="secondary"
         )
@@ -248,6 +266,53 @@ class SettingsWindow:
         )
         ai_help.pack(anchor=W, pady=(5, 0))
 
+        # Free Time Bucket Section
+        bucket_label = ttk.Label(
+            main_frame,
+            text="Free Time Bucket",
+            font=("Helvetica", 14, "bold")
+        )
+        bucket_label.pack(anchor=W, pady=(10, 10))
+
+        bucket_frame = ttk.Labelframe(main_frame, text="Reward System", padding=10)
+        bucket_frame.pack(fill=X, pady=(0, 20))
+
+        # Enable toggle
+        self.bucket_enabled_var = ttk.BooleanVar(value=self.config.free_time_bucket_enabled)
+        bucket_toggle = ttk.Checkbutton(
+            bucket_frame,
+            text="Enable Free Time Bucket",
+            variable=self.bucket_enabled_var,
+            bootstyle="round-toggle"
+        )
+        bucket_toggle.pack(anchor=W, pady=5)
+
+        # Ratio setting
+        ratio_frame = ttk.Frame(bucket_frame)
+        ratio_frame.pack(fill=X, pady=5)
+
+        ttk.Label(ratio_frame, text="Free minutes per work minute:").pack(side=LEFT)
+        self.ratio_var = ttk.DoubleVar(value=self.config.free_time_ratio)
+        ratio_spin = ttk.Spinbox(
+            ratio_frame,
+            from_=0.5,
+            to=5.0,
+            increment=0.5,
+            textvariable=self.ratio_var,
+            width=5
+        )
+        ratio_spin.pack(side=RIGHT)
+
+        # Help text
+        bucket_help = ttk.Label(
+            bucket_frame,
+            text="Earn free time by completing pomodoros. Free time drains\nonly when using blocked apps/sites outside work sessions.",
+            font=("Helvetica", 8),
+            bootstyle="secondary",
+            wraplength=380
+        )
+        bucket_help.pack(anchor=W, pady=(5, 0))
+
         # Buttons
         buttons_frame = ttk.Frame(main_frame)
         buttons_frame.pack(fill=X, pady=(20, 0))
@@ -275,7 +340,7 @@ class SettingsWindow:
 
         # Set size and center on parent
         width = 450
-        height = 820  # Increased to accommodate AI detection settings
+        height = 960  # Increased for free time bucket section
         x = self.parent.winfo_x() + (self.parent.winfo_width() - width) // 2
         y = self.parent.winfo_y() + (self.parent.winfo_height() - height) // 2
         self.dialog.geometry(f"{width}x{height}+{x}+{y}")
@@ -293,6 +358,7 @@ class SettingsWindow:
         return {
             'work_minutes': self.work_var.get(),
             'break_minutes': self.break_var.get(),
+            'long_break_minutes': self.long_break_var.get(),
             'sets_per_session': self.sets_var.get(),
             'cooldown_minutes': self.cooldown_var.get(),
             'typing_challenge_length': self.challenge_var.get(),
@@ -300,6 +366,8 @@ class SettingsWindow:
             'auto_start': self.autostart_var.get(),
             'ai_nsfw_detection_enabled': self.ai_nsfw_var.get(),
             'openai_api_key': self.api_key_var.get(),
+            'free_time_bucket_enabled': self.bucket_enabled_var.get(),
+            'free_time_ratio': self.ratio_var.get(),
         }
 
     def _has_unsaved_changes(self) -> bool:
@@ -331,12 +399,15 @@ class SettingsWindow:
         # Update config
         self.config.work_minutes = self.work_var.get()
         self.config.break_minutes = self.break_var.get()
+        self.config.long_break_minutes = self.long_break_var.get()
         self.config.sets_per_session = self.sets_var.get()
         self.config.cooldown_minutes = self.cooldown_var.get()
         self.config.typing_challenge_length = self.challenge_var.get()
         self.config.start_minimized = self.minimized_var.get()
         self.config.ai_nsfw_detection_enabled = self.ai_nsfw_var.get()
         self.config.openai_api_key = self.api_key_var.get()
+        self.config.free_time_bucket_enabled = self.bucket_enabled_var.get()
+        self.config.free_time_ratio = self.ratio_var.get()
 
         # Handle auto-start
         if self.autostart_var.get():
@@ -355,7 +426,7 @@ class SettingsWindow:
         # Notify callback
         self.on_save(self.config)
 
-        print(f"Settings saved: work={self.config.work_minutes}min, break={self.config.break_minutes}min, sets={self.config.sets_per_session}")
+        print(f"Settings saved: work={self.config.work_minutes}min, break={self.config.break_minutes}min, long_break={self.config.long_break_minutes}min, sets={self.config.sets_per_session}")
 
         # Close dialog
         self.dialog.destroy()

