@@ -16,6 +16,7 @@ HOSTS_PATH = Path(r"C:\Windows\System32\drivers\etc\hosts")
 # Timer defaults (52/17 method)
 DEFAULT_WORK_MINUTES = 52
 DEFAULT_BREAK_MINUTES = 17
+DEFAULT_LONG_BREAK_MINUTES = 30  # Long break after completing all sets
 DEFAULT_SETS_PER_SESSION = 3  # Number of work sessions before user can close app
 
 # Disable guard settings
@@ -26,7 +27,7 @@ DEFAULT_TYPING_CHALLENGE_LENGTH = 1000
 DEFAULT_AFK_THRESHOLD_MINUTES = 10  # Pause timer after 10 minutes of inactivity
 
 # Adult site punishment settings
-DEFAULT_MAX_ADULT_STRIKES = 2  # 3rd attempt triggers punishment
+DEFAULT_MAX_ADULT_STRIKES = 5  # 6th attempt triggers punishment
 DEFAULT_PUNISHMENT_HOURS = 2  # Lock duration in hours
 PUNISHMENT_STATE_FILE = APP_DATA_DIR / "punishment_state.json"
 PUNISHMENT_ENFORCEMENT_INTERVAL = 30  # Re-check adapters every 30 seconds
@@ -34,6 +35,9 @@ PUNISHMENT_ENFORCEMENT_INTERVAL = 30  # Re-check adapters every 30 seconds
 # Usage tracking settings
 USAGE_DATA_FILE = APP_DATA_DIR / "usage_data.json"
 NSFW_CACHE_FILE = APP_DATA_DIR / "nsfw_cache.json"
+FREE_TIME_BUCKET_FILE = APP_DATA_DIR / "free_time_bucket.json"
+FREE_TIME_WARNING_SECONDS = 120  # 2-minute warning before bucket empties
+DEFAULT_FREE_TIME_RATIO = 2.0  # minutes of free time per minute of work
 USAGE_TRACKING_INTERVAL = 1  # seconds between tracking checks
 
 # Process blocker settings
