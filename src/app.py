@@ -722,7 +722,10 @@ class ProductivityApp:
     def _do_stop(self) -> None:
         """Actually stop the timer and blocking."""
         # Capture elapsed work time before stop() resets _time_remaining
-        if self.timer.state == TimerState.WORKING and self.config.free_time_bucket_enabled:
+        is_working = (self.timer.state == TimerState.WORKING
+                      or (self.timer.state == TimerState.PAUSED
+                          and self.timer.paused_from_state == TimerState.WORKING))
+        if is_working and self.config.free_time_bucket_enabled:
             elapsed = self.timer.work_seconds - self.timer.time_remaining
             if elapsed > 0:
                 earned = elapsed * self.config.free_time_ratio

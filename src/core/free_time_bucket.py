@@ -72,8 +72,9 @@ class FreeTimeBucket:
             if self.balance_seconds <= 0:
                 return
 
+            actual_drained = min(seconds, self.balance_seconds)
             self.balance_seconds = max(0.0, self.balance_seconds - seconds)
-            self.total_used_seconds += seconds
+            self.total_used_seconds += actual_drained
             self._dirty = True
 
             # Check warning threshold
