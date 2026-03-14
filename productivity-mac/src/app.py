@@ -957,11 +957,13 @@ class ProductivityApp:
             self._on_exit(write_sentinel=False)
 
     def _handle_signal(self, signum, frame) -> None:
-        """Handle SIGTERM/SIGINT — refuse to die during active sessions."""
-        if self._session_active or self.timer.state == TimerState.WORKING:
-            print(f"Signal {signum} caught — session active, ignoring")
-            return
-        # Exit without sentinel — guards will respawn
+        """Handle SIGTERM/SIGINT — always exit to not block system shutdown.
+
+        The guard/launchd processes will respawn us after shutdown completes,
+        so we don't lose session protection. Blocking SIGTERM prevents macOS
+        from shutting down or logging out.
+        """
+        print(f"Signal {signum} caught — exiting (guards will respawn)")
         self._on_exit(write_sentinel=False)
 
     def _on_exit_request(self) -> None:
