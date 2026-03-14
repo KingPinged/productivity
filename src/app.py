@@ -230,10 +230,25 @@ class ProductivityApp:
         """Handle usage tick from app tracker."""
         self.usage_data.record_usage(name, category, seconds)
 
+        # Drain free time bucket if using a blocked app during IDLE
+        if (category == 'app'
+                and self.config.free_time_bucket_enabled
+                and self.timer.state == TimerState.IDLE
+                and self.free_time_bucket.has_time()
+                and name.lower() in (app.lower() for app in self.config.get_all_blocked_apps())):
+            self.free_time_bucket.drain(seconds)
+
     def _on_website_usage(self, category: str, name: str, seconds: int) -> None:
         """Handle website usage report from extension."""
         print(f"Website usage: {name} - {seconds}s")
         self.usage_data.record_usage(name, category, seconds)
+
+        # Drain free time bucket if using a blocked website during IDLE
+        if (self.config.free_time_bucket_enabled
+                and self.timer.state == TimerState.IDLE
+                and self.free_time_bucket.has_time()
+                and name.lower() in (site.lower() for site in self.config.get_all_blocked_websites())):
+            self.free_time_bucket.drain(seconds)
 
     def _schedule_usage_save(self) -> None:
         """Schedule periodic usage data saves."""
