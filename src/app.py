@@ -794,6 +794,14 @@ class ProductivityApp:
         # Re-evaluate bucket display and blocking state after settings change
         self._update_bucket_display()
 
+        # Re-evaluate blocking state when bucket setting changes during IDLE
+        if self.timer.state == TimerState.IDLE:
+            if (config.free_time_bucket_enabled
+                    and not self.free_time_bucket.has_time()):
+                self._start_blocking()
+            else:
+                self._stop_blocking()
+
     def _on_blocklist(self) -> None:
         """Handle blocklist button click."""
         if self.timer.state != TimerState.IDLE:
