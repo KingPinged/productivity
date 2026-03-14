@@ -96,6 +96,9 @@ class ProductivityApp:
                 and not self.free_time_bucket.has_time()):
             self.root.after(500, self._start_blocking)
 
+        # Set initial bucket display
+        self.root.after(100, self._update_bucket_display)
+
         # Start watching the guard process
         self._start_guard_watcher()
 
@@ -470,13 +473,20 @@ class ProductivityApp:
         secs = seconds_remaining % 60
         state_upper = state.upper()
         cycles_today = self.config.get_cycles_today()
-        # Capture values in lambda defaults to avoid closure issues
+        # Build tooltip with optional free time info
+        tooltip = f"{state_upper} - {minutes:02d}:{secs:02d} | Cycles: {cycles_today}"
+        if self.config.free_time_bucket_enabled:
+            bucket_text = self.free_time_bucket.format_balance(draining=False)
+            tooltip += f" | Free: {bucket_text}"
+
         self.root.after(
             0,
-            lambda s=state_upper, m=minutes, sc=secs, c=cycles_today: self.tray_icon.update_tooltip(
-                f"{s} - {m:02d}:{sc:02d} | Cycles: {c}"
-            )
+            lambda t=tooltip: self.tray_icon.update_tooltip(t)
         )
+
+        # Update bucket display
+        if self.config.free_time_bucket_enabled:
+            self.root.after(0, self._update_bucket_display)
 
     def _on_state_change(self, new_state: str) -> None:
         """Handle timer state change."""
@@ -505,6 +515,9 @@ class ProductivityApp:
             else:
                 self._stop_blocking()
             self.disable_guard.end_session()
+
+        # Update bucket display on state change
+        self.root.after(0, self._update_bucket_display)
 
     def _on_session_complete(self, completed_state: str) -> None:
         """Handle session completion (work or break ended)."""
@@ -546,6 +559,17 @@ class ProductivityApp:
         today = self.config.get_cycles_today()
         total = self.config.total_cycles
         self.main_window.update_cycle_count(today, total)
+
+    def _update_bucket_display(self) -> None:
+        """Update the free time bucket display in the main window."""
+        if not self.config.free_time_bucket_enabled:
+            self.main_window.update_free_time("", visible=False)
+            return
+
+        is_draining = (self.timer.state == TimerState.IDLE
+                       and self.free_time_bucket.has_time())
+        text = self.free_time_bucket.format_balance(draining=is_draining)
+        self.main_window.update_free_time(text, visible=True)
 
     def _update_sets_display(self) -> None:
         """Update the sets progress display in the UI."""
@@ -763,6 +787,9 @@ class ProductivityApp:
 
         # Update initial display
         self.main_window.set_initial_time(config.work_minutes * 60)
+
+        # Re-evaluate bucket display and blocking state after settings change
+        self._update_bucket_display()
 
     def _on_blocklist(self) -> None:
         """Handle blocklist button click."""
