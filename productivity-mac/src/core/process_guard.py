@@ -1,8 +1,17 @@
 """
 Process guard - monitors and respawns the app if killed (macOS).
 Runs as a separate process to make the app harder to terminate.
+
+Dual-guard system: two guard processes watch both the main app and
+each other, so killing one guard still leaves another to respawn it.
+
+Modes:
+  - Legacy mode: guard.watch() spawns and watches the main app
+  - PID watch mode: --watch-pid <PID> monitors an existing process
+    and respawns run.py if it dies (unless clean_exit sentinel exists)
 """
 
+import argparse
 import subprocess
 import sys
 import os
@@ -40,6 +49,27 @@ def set_process_priority_low():
         os.nice(19)
     except Exception:
         pass
+
+
+def count_running_guards(exclude_pid: int = None) -> int:
+    """Count how many guard processes are currently running."""
+    count = 0
+    for proc in psutil.process_iter(['pid', 'cmdline']):
+        try:
+            if proc.info['pid'] == exclude_pid:
+                continue
+            cmdline = proc.info.get('cmdline') or []
+            cmdline_str = ' '.join(cmdline)
+            if '--watch-pid' in cmdline_str and 'process_guard' in cmdline_str:
+                count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return count
+
+
+def is_guard_already_running(exclude_pid: int = None) -> bool:
+    """Check if another guard process is already running."""
+    return count_running_guards(exclude_pid) > 0
 
 
 class ProcessGuard:
@@ -139,6 +169,129 @@ def find_main_app() -> Path:
     return None
 
 
+def _find_running_app(exclude_pid: int = None) -> int:
+    """Find a running instance of the main app and return its PID, or None."""
+    for proc in psutil.process_iter(['pid', 'cmdline']):
+        try:
+            if proc.info['pid'] == exclude_pid:
+                continue
+            cmdline = proc.info.get('cmdline') or []
+            cmdline_str = ' '.join(cmdline)
+            # Match the main app (run.py / main.py) but not guard processes
+            if ('run.py' in cmdline_str or 'src.main' in cmdline_str) \
+                    and '--watch-pid' not in cmdline_str:
+                return proc.info['pid']
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return None
+
+
+def _spawn_peer_guard(guard_script: str, app_pid: int, guard_id: int) -> int:
+    """Spawn a peer guard process and return its PID."""
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, guard_script,
+             "--watch-pid", str(app_pid),
+             "--guard-id", str(guard_id)],
+            start_new_session=True,
+        )
+        print(f"[Guard] Respawned peer guard {guard_id} with PID {proc.pid}")
+        return proc.pid
+    except Exception as e:
+        print(f"[Guard] Failed to respawn peer guard: {e}")
+        return None
+
+
+def _restore_dns_if_needed() -> None:
+    """Restore DNS settings if a saved original config exists.
+
+    Called when the main app crashes to prevent DNS lockout.
+    """
+    try:
+        from src.core.dns_proxy import restore_dns_settings, _DNS_ORIGINAL_FILE
+        if _DNS_ORIGINAL_FILE.exists():
+            print("[Guard] Restoring DNS settings after app crash")
+            restore_dns_settings()
+    except Exception as e:
+        print(f"[Guard] DNS restore failed: {e}")
+
+
+def watch_pid(pid: int, guard_id: int = 1, check_interval: int = 3) -> None:
+    """
+    Monitor the main app PID and respawn run.py if it dies,
+    unless the clean_exit sentinel file exists.
+    Also monitors peer guard and respawns it if killed.
+    """
+    from src.utils.constants import CLEAN_EXIT_FILE
+
+    set_process_priority_low()
+    main_app = find_main_app()
+    guard_script = str(Path(__file__).resolve())
+    peer_id = 2 if guard_id == 1 else 1
+
+    if main_app is None:
+        print(f"[Guard-{guard_id}] Could not find main application!")
+        return
+
+    print(f"[Guard-{guard_id}] Watching app PID {pid}, will respawn if killed")
+
+    while True:
+        time.sleep(check_interval)
+
+        # --- Check clean exit (both guards should stop) ---
+        # NOTE: Don't delete the sentinel here — the app deletes it on
+        # startup.  If we deleted it, the peer guard might miss it and
+        # respawn the app.
+        if CLEAN_EXIT_FILE.exists():
+            print(f"[Guard-{guard_id}] Clean exit detected — stopping guard")
+            # Ensure DNS is restored on clean exit too
+            _restore_dns_if_needed()
+            return
+
+        # --- Check peer guard health ---
+        peer_count = count_running_guards(exclude_pid=os.getpid())
+        if peer_count == 0:
+            print(f"[Guard-{guard_id}] Peer guard missing — respawning guard-{peer_id}")
+            _spawn_peer_guard(guard_script, pid, peer_id)
+
+        # --- Check main app health ---
+        if psutil.pid_exists(pid):
+            continue
+
+        # PID is gone — stagger by guard_id so only one guard respawns
+        time.sleep(guard_id)
+
+        # Re-check: clean exit, or maybe peer already respawned
+        if CLEAN_EXIT_FILE.exists():
+            print(f"[Guard-{guard_id}] Clean exit detected — stopping guard")
+            return
+
+        # Check if peer guard already respawned the app
+        existing_pid = _find_running_app()
+        if existing_pid is not None:
+            print(f"[Guard-{guard_id}] App already running (PID {existing_pid}) — adopting")
+            pid = existing_pid
+            continue
+
+        # Force-killed — restore DNS before respawning
+        _restore_dns_if_needed()
+
+        print(f"[Guard-{guard_id}] App PID {pid} died unexpectedly — respawning {main_app}")
+
+        try:
+            if main_app.suffix == '.py':
+                proc = subprocess.Popen([sys.executable, str(main_app)])
+            else:
+                proc = subprocess.Popen([str(main_app)])
+
+            # Now watch the new process
+            pid = proc.pid
+            print(f"[Guard-{guard_id}] New app started with PID {pid}")
+        except Exception as e:
+            print(f"[Guard-{guard_id}] Failed to respawn: {e}")
+            time.sleep(5)
+
+
 def run_guard():
     """Entry point for running as guard process."""
     main_app = find_main_app()
@@ -153,4 +306,25 @@ def run_guard():
 
 
 if __name__ == "__main__":
-    run_guard()
+    # Suppress macOS crash reporter dialog
+    import resource
+    import signal
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        signal.signal(signal.SIGABRT, signal.SIG_IGN)
+    except Exception:
+        pass
+
+    # Add project root to path so `from src.…` imports work when
+    # this file is launched as a standalone subprocess.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--watch-pid', type=int, help='PID to monitor')
+    parser.add_argument('--guard-id', type=int, default=1, help='Guard instance ID (1 or 2)')
+    args = parser.parse_args()
+
+    if args.watch_pid:
+        watch_pid(args.watch_pid, guard_id=args.guard_id)
+    else:
+        run_guard()

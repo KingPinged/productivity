@@ -23,7 +23,7 @@ class WebsiteBlocker:
     """
 
     def __init__(self, blocked_sites: Set[str], always_blocked_sites: Set[str] = None,
-                 whitelisted_urls: list = None):
+                 whitelisted_urls: list = None, has_admin: bool = False):
         """
         Initialize the website blocker.
 
@@ -32,7 +32,9 @@ class WebsiteBlocker:
             always_blocked_sites: Set of domain names to always block (adult content)
             whitelisted_urls: List of URLs that are whitelisted - their domains will be
                               excluded from hosts file blocking (handled by browser extension)
+            has_admin: Whether the app is running with admin privileges
         """
+        self.has_admin = has_admin
         self.whitelisted_urls = whitelisted_urls or []
         # Filter out domains that have whitelisted URLs
         self.blocked_sites = self._filter_whitelisted_domains(set(blocked_sites))
@@ -41,8 +43,8 @@ class WebsiteBlocker:
         self._backup_path = HOSTS_PATH.parent / "hosts.productivity.backup"
         self._last_error = ""
 
-        # Apply always-blocked sites immediately on init
-        if self.always_blocked_sites:
+        # Apply always-blocked sites immediately on init (only with admin)
+        if self.has_admin and self.always_blocked_sites:
             self._apply_always_blocked()
 
     def _filter_whitelisted_domains(self, blocked_sites: Set[str]) -> Set[str]:
@@ -212,27 +214,37 @@ class WebsiteBlocker:
                 return f.read()
 
     def _write_hosts(self, content: str) -> bool:
-        """Write hosts file using osascript for privilege escalation."""
+        """Write hosts file, using direct write if root or osascript for elevation."""
         try:
-            # Create backup first
+            import os
+
+            # Create backup first (non-critical)
             if HOSTS_PATH.exists():
                 try:
-                    subprocess.run(
-                        [
-                            'osascript', '-e',
-                            f'do shell script "cp /etc/hosts {self._backup_path}" with administrator privileges',
-                        ],
-                        capture_output=True,
-                    )
+                    if os.geteuid() == 0:
+                        shutil.copy2(str(HOSTS_PATH), str(self._backup_path))
+                    else:
+                        subprocess.run(
+                            [
+                                'osascript', '-e',
+                                f'do shell script "cp /etc/hosts {self._backup_path}" with administrator privileges',
+                            ],
+                            capture_output=True,
+                        )
                 except Exception:
                     pass  # Backup failure is not critical
 
-            # Write content to a temp file, then copy to /etc/hosts with admin privileges
+            if os.geteuid() == 0:
+                # Already root - write directly
+                with open(HOSTS_PATH, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                return True
+
+            # Not root - write to temp file, then copy with admin privileges
             with tempfile.NamedTemporaryFile(mode='w', suffix='.hosts', delete=False, encoding='utf-8') as tmp:
                 tmp.write(content)
                 tmp_path = tmp.name
 
-            # Copy temp file to /etc/hosts with admin privileges
             result = subprocess.run(
                 [
                     'osascript', '-e',

@@ -1,24 +1,38 @@
 """
-System tray icon for Productivity Timer.
+System tray icon for Productivity Timer (macOS).
+Uses pyobjc NSStatusBar directly — no separate event loop, no thread conflicts.
 """
 
-import threading
 from typing import Callable, Optional
-from PIL import Image, ImageDraw
-
-try:
-    import pystray
-    from pystray import Icon, Menu, MenuItem
-    PYSTRAY_AVAILABLE = True
-except ImportError:
-    PYSTRAY_AVAILABLE = False
 
 from src.utils.constants import TimerState
+
+try:
+    from AppKit import (
+        NSStatusBar, NSVariableStatusItemLength, NSMenu, NSMenuItem,
+        NSImage,
+    )
+    from Foundation import NSObject, NSSize, NSData
+    APPKIT_AVAILABLE = True
+except ImportError:
+    APPKIT_AVAILABLE = False
+
+try:
+    from PIL import Image, ImageDraw
+    import io
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+
+# Store callback references at module level to prevent garbage collection
+_menu_targets = []
 
 
 class TrayIcon:
     """
-    System tray icon with context menu.
+    System tray (status bar) icon using native macOS NSStatusItem.
+    No threads — integrates directly with the Cocoa layer Tkinter already uses.
     """
 
     def __init__(
@@ -30,17 +44,6 @@ class TrayIcon:
         on_settings: Callable,
         on_exit: Callable,
     ):
-        """
-        Initialize the tray icon.
-
-        Args:
-            on_show: Callback to show main window
-            on_start: Callback to start timer
-            on_pause: Callback to pause timer
-            on_stop: Callback to stop timer
-            on_settings: Callback to show settings
-            on_exit: Callback to exit application
-        """
         self.on_show = on_show
         self.on_start = on_start
         self.on_pause = on_pause
@@ -48,145 +51,143 @@ class TrayIcon:
         self.on_settings = on_settings
         self.on_exit = on_exit
 
-        self._icon: Optional[Icon] = None
+        self._status_item = None
         self._current_state = TimerState.IDLE
+        self._available = APPKIT_AVAILABLE and PIL_AVAILABLE
+        self._started = False
+        self._session_active = False
 
-        if PYSTRAY_AVAILABLE:
-            self._setup_icon()
-
-    def _create_icon_image(self, color: str = "#808080") -> Image:
-        """
-        Create a simple icon image.
-
-        Args:
-            color: Fill color for the icon
-
-        Returns:
-            PIL Image object
-        """
-        size = 64
+    def _create_ns_image(self, color: str = "#808080") -> 'NSImage':
+        """Create an NSImage from a PIL-drawn icon."""
+        size = 22
         image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
 
-        # Draw a circle with the given color
-        margin = 4
+        margin = 2
         draw.ellipse(
             [margin, margin, size - margin, size - margin],
             fill=color,
             outline="#FFFFFF",
-            width=2
+            width=1
         )
 
-        # Draw a "P" for Productivity
-        draw.text(
-            (size // 2 - 8, size // 2 - 12),
-            "P",
-            fill="#FFFFFF",
-            font=None  # Use default font
+        buf = io.BytesIO()
+        image.save(buf, format='PNG')
+        png_bytes = buf.getvalue()
+        data = NSData.dataWithBytes_length_(png_bytes, len(png_bytes))
+        ns_image = NSImage.alloc().initWithData_(data)
+        ns_image.setSize_(NSSize(size, size))
+        ns_image.setTemplate_(True)  # Adapts to dark/light menu bar
+        return ns_image
+
+    def _make_menu_item(self, title: str, callback: Callable) -> 'NSMenuItem':
+        """Create a menu item with a callback target."""
+        if not APPKIT_AVAILABLE:
+            return None
+        target = _CallbackTarget.alloc().init()
+        target._callback = callback
+        _menu_targets.append(target)  # prevent GC
+
+        mi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            title, "handleAction:", ""
         )
+        mi.setTarget_(target)
+        return mi
 
-        return image
+    def _build_menu(self) -> 'NSMenu':
+        """Build the status bar dropdown menu."""
+        _menu_targets.clear()
+        menu = NSMenu.alloc().init()
 
-    def _setup_icon(self) -> None:
-        """Set up the system tray icon."""
-        image = self._create_icon_image()
+        menu.addItem_(self._make_menu_item("Show Timer", self.on_show))
+        menu.addItem_(NSMenuItem.separatorItem())
+        menu.addItem_(self._make_menu_item("Start Session", self.on_start))
+        menu.addItem_(self._make_menu_item("Pause", self.on_pause))
+        menu.addItem_(self._make_menu_item("Stop Session", self.on_stop))
+        menu.addItem_(NSMenuItem.separatorItem())
+        menu.addItem_(self._make_menu_item("Settings", self.on_settings))
 
-        menu = Menu(
-            MenuItem("Show Timer", self._on_show_click, default=True),
-            Menu.SEPARATOR,
-            MenuItem("Start Session", self._on_start_click),
-            MenuItem("Pause", self._on_pause_click),
-            MenuItem("Stop Session", self._on_stop_click),
-            Menu.SEPARATOR,
-            MenuItem("Settings", self._on_settings_click),
-            Menu.SEPARATOR,
-            MenuItem("Exit", self._on_exit_click),
-        )
+        if not self._session_active:
+            menu.addItem_(NSMenuItem.separatorItem())
+            menu.addItem_(self._make_menu_item("Exit", self.on_exit))
 
-        self._icon = Icon(
-            "ProductivityTimer",
-            image,
-            "Productivity Timer",
-            menu
-        )
+        return menu
 
-    def _on_show_click(self, icon, item) -> None:
-        """Handle Show Timer click."""
-        self.on_show()
-
-    def _on_start_click(self, icon, item) -> None:
-        """Handle Start Session click."""
-        self.on_start()
-
-    def _on_pause_click(self, icon, item) -> None:
-        """Handle Pause click."""
-        self.on_pause()
-
-    def _on_stop_click(self, icon, item) -> None:
-        """Handle Stop Session click."""
-        self.on_stop()
-
-    def _on_settings_click(self, icon, item) -> None:
-        """Handle Settings click."""
-        self.on_settings()
-
-    def _on_exit_click(self, icon, item) -> None:
-        """Handle Exit click."""
-        # Don't stop here - let the app decide if exit is allowed
-        # The app will call stop() when actually exiting
-        self.on_exit()
+    def set_session_active(self, active: bool) -> None:
+        """Show/hide Exit menu item based on session state."""
+        self._session_active = active
+        if self._status_item:
+            self._status_item.setMenu_(self._build_menu())
 
     def start(self) -> None:
-        """Start the tray icon in a background thread."""
-        if self._icon:
-            thread = threading.Thread(target=self._icon.run, daemon=True)
-            thread.start()
-
-    def stop(self) -> None:
-        """Stop the tray icon."""
-        if self._icon:
-            self._icon.stop()
-
-    def update_state(self, state: str) -> None:
-        """
-        Update the icon based on timer state.
-
-        Args:
-            state: Current timer state
-        """
-        self._current_state = state
-
-        if not self._icon:
+        """Create and show the status bar icon on the main thread."""
+        if not self._available or self._started:
             return
 
-        # Update icon color based on state
-        if state == TimerState.WORKING:
-            color = "#E74C3C"  # Red
-            tooltip = "Productivity Timer - Working"
-        elif state == TimerState.BREAK:
-            color = "#2ECC71"  # Green
-            tooltip = "Productivity Timer - Break"
-        elif state == TimerState.PAUSED:
-            color = "#F39C12"  # Orange
-            tooltip = "Productivity Timer - Paused"
-        else:
-            color = "#808080"  # Gray
-            tooltip = "Productivity Timer - Idle"
+        try:
+            self._status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
+                NSVariableStatusItemLength
+            )
+            self._status_item.setImage_(self._create_ns_image())
+            self._status_item.setToolTip_("Productivity Timer")
+            self._status_item.setMenu_(self._build_menu())
+            self._started = True
+            print("Tray icon started (NSStatusBar)")
+        except Exception as e:
+            print(f"Tray icon error: {e}")
+            self._available = False
 
-        # Update icon
-        self._icon.icon = self._create_icon_image(color)
-        self._icon.title = tooltip
+    def stop(self) -> None:
+        """Remove the status bar icon."""
+        if self._status_item:
+            try:
+                NSStatusBar.systemStatusBar().removeStatusItem_(self._status_item)
+            except Exception:
+                pass
+            self._status_item = None
+        self._started = False
+        _menu_targets.clear()
+
+    def update_state(self, state: str) -> None:
+        """Update the icon color based on timer state."""
+        self._current_state = state
+        if not self._status_item:
+            return
+
+        color_map = {
+            TimerState.WORKING: ("#E74C3C", "Working"),
+            TimerState.BREAK: ("#2ECC71", "Break"),
+            TimerState.PAUSED: ("#F39C12", "Paused"),
+        }
+        color, label = color_map.get(state, ("#808080", "Idle"))
+
+        try:
+            self._status_item.setImage_(self._create_ns_image(color))
+            self._status_item.setToolTip_(f"Productivity Timer - {label}")
+        except Exception:
+            pass
 
     def update_tooltip(self, text: str) -> None:
-        """
-        Update the tray icon tooltip.
-
-        Args:
-            text: New tooltip text
-        """
-        if self._icon:
-            self._icon.title = text
+        """Update the tray icon tooltip."""
+        if self._status_item:
+            try:
+                self._status_item.setToolTip_(text)
+            except Exception:
+                pass
 
     def is_available(self) -> bool:
         """Check if system tray is available."""
-        return PYSTRAY_AVAILABLE
+        return self._available
+
+
+if APPKIT_AVAILABLE:
+    class _CallbackTarget(NSObject):
+        """Bridging object: receives Cocoa menu actions, calls Python callbacks."""
+
+        _callback = None
+
+        def handleAction_(self, sender):
+            if self._callback:
+                # Callbacks are already wrapped with root.after(0, ...) in app.py,
+                # so they're safe to call from any thread.
+                self._callback()

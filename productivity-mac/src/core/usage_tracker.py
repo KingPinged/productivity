@@ -1,10 +1,12 @@
 """
 Usage tracker for monitoring which applications are in focus (macOS).
 Uses NSWorkspace API to detect the foreground application and track time spent.
+
+All PyObjC/Quartz calls run on the main thread (via tkinter after()) to avoid
+GIL corruption that occurs when calling these APIs from background threads
+on Python 3.13+.
 """
 
-import threading
-import time
 from typing import Optional, Callable
 
 from src.utils.constants import USAGE_TRACKING_INTERVAL
@@ -14,12 +16,15 @@ class UsageTracker:
     """
     Tracks which applications are currently in focus.
     Uses macOS NSWorkspace API to monitor foreground app and record usage time.
+    Polls on the main thread via root.after() to avoid PyObjC threading issues.
     """
 
     def __init__(
         self,
         on_usage_tick: Optional[Callable[[str, str, int], None]] = None,
         afk_check: Optional[Callable[[], bool]] = None,
+        root=None,
+        browser_tracker=None,
     ):
         """
         Initialize the usage tracker.
@@ -27,13 +32,17 @@ class UsageTracker:
         Args:
             on_usage_tick: Callback(name, category, seconds) when tracking
             afk_check: Function returning True if user is AFK
+            root: Tkinter root window for scheduling (required)
+            browser_tracker: Optional BrowserTracker for native URL detection
         """
         self.on_usage_tick = on_usage_tick
         self.afk_check = afk_check
+        self._root = root
+        self.browser_tracker = browser_tracker
 
         self._available = True
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._after_id = None
         self._current_app: Optional[str] = None
 
         try:
@@ -72,45 +81,56 @@ class UsageTracker:
         """
         return self.get_foreground_app()
 
-    def _tracking_loop(self) -> None:
-        """Background thread that tracks foreground app usage."""
-        while self._running:
-            try:
-                # Check if user is AFK
-                if self.afk_check and self.afk_check():
-                    # User is AFK - don't count this interval
-                    time.sleep(USAGE_TRACKING_INTERVAL)
-                    continue
+    def _tick(self) -> None:
+        """Main-thread polling tick scheduled via root.after()."""
+        if not self._running:
+            return
 
-                # Get current foreground app
+        try:
+            # Check if user is AFK (Quartz call — must be on main thread)
+            if not (self.afk_check and self.afk_check()):
+                # Get current foreground app (NSWorkspace — must be on main thread)
                 app_name = self.get_foreground_app()
 
                 if app_name and self.on_usage_tick:
-                    # Record 1 second of usage for this app
-                    self.on_usage_tick(app_name, 'app', 1)
+                    self.on_usage_tick(app_name, 'app', USAGE_TRACKING_INTERVAL)
                     self._current_app = app_name
 
-            except Exception as e:
-                print(f"Usage tracker error: {e}")
+                # Native browser tracking fallback
+                if app_name and self.browser_tracker:
+                    self.browser_tracker.on_tick(app_name, USAGE_TRACKING_INTERVAL)
+        except Exception as e:
+            print(f"Usage tracker error: {e}")
 
-            time.sleep(USAGE_TRACKING_INTERVAL)
+        # Schedule next tick
+        if self._running and self._root:
+            self._after_id = self._root.after(
+                USAGE_TRACKING_INTERVAL * 1000, self._tick
+            )
 
     def start(self) -> None:
-        """Start the usage tracking background thread."""
+        """Start usage tracking on the main thread."""
         if self._running or not self._available:
+            return
+        if not self._root:
+            print("Usage tracker: no root window, cannot start")
             return
 
         self._running = True
-        self._thread = threading.Thread(target=self._tracking_loop, daemon=True)
-        self._thread.start()
+        self._after_id = self._root.after(
+            USAGE_TRACKING_INTERVAL * 1000, self._tick
+        )
         print("Usage tracker started")
 
     def stop(self) -> None:
-        """Stop the usage tracking."""
+        """Stop usage tracking."""
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=2.0)
-            self._thread = None
+        if self._after_id and self._root:
+            try:
+                self._root.after_cancel(self._after_id)
+            except (ValueError, Exception):
+                pass
+            self._after_id = None
         print("Usage tracker stopped")
 
     def is_running(self) -> bool:

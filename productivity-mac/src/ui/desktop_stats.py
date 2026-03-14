@@ -1,9 +1,8 @@
 """
 Desktop Stats Widget - Displays productivity stats as a floating window (macOS).
-Uses a simple topmost Tkinter window instead of Windows WorkerW embedding.
+Uses a Toplevel window on the main Tkinter thread.
 """
 
-import threading
 import time
 import tkinter as tk
 from typing import Optional, Callable
@@ -39,10 +38,12 @@ class DesktopStatsWidget:
     """
     Desktop widget that displays productivity stats as a floating window.
     Shows hours worked and time since last adult site access.
+    Uses Toplevel on the main Tkinter thread (macOS requires all UI on main thread).
     """
 
     def __init__(
         self,
+        master: tk.Tk,
         get_stats_callback: Callable[[], StatsData],
         update_interval_ms: int = 1000
     ):
@@ -50,14 +51,17 @@ class DesktopStatsWidget:
         Initialize the desktop stats widget.
 
         Args:
+            master: The main Tk root window
             get_stats_callback: Function that returns current StatsData
             update_interval_ms: How often to update display (default 1 second)
         """
+        self.master = master
         self.get_stats = get_stats_callback
         self.update_interval = update_interval_ms
-        self.root: Optional[tk.Tk] = None
+        self.window: Optional[tk.Toplevel] = None
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._cached_clean_since: Optional[float] = None  # epoch timestamp for local clean timer
+        self._slow_update_interval = 30000  # 30 seconds for expensive stats
 
     def _format_duration(self, total_seconds: int) -> str:
         """Format seconds into Days:Hours:Minutes:Seconds format."""
@@ -84,29 +88,31 @@ class DesktopStatsWidget:
         return f"{minutes}m"
 
     def _create_window(self):
-        """Create the Tkinter window as a simple topmost floating widget."""
-        self.root = tk.Tk()
-        self.root.title("ProductivityStats")
+        """Create the Toplevel window as a simple topmost floating widget."""
+        self.window = tk.Toplevel(self.master)
+        self.window.title("ProductivityStats")
 
         # Remove window decorations
-        self.root.overrideredirect(True)
+        self.window.overrideredirect(True)
 
         # Set window size and position (top-left corner with padding)
         width = 380
         height = 270
         x = 20
         y = 20
-        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self.window.geometry(f"{width}x{height}+{x}+{y}")
 
-        # Make window background transparent
-        self.root.configure(bg='black')
-        self.root.attributes('-transparentcolor', 'black')
+        # Dark background (no -transparentcolor on macOS)
+        self.window.configure(bg='#1a1a1a')
 
-        # Keep on top initially, then allow other windows to overlap
-        self.root.attributes('-topmost', True)
+        # Set window transparency via macOS alpha
+        self.window.attributes('-alpha', 0.9)
+
+        # Keep on top — this is a small always-visible stats overlay
+        self.window.attributes('-topmost', True)
 
         # Create main frame with semi-transparent background effect
-        self.frame = tk.Frame(self.root, bg='#1a1a1a', highlightthickness=0)
+        self.frame = tk.Frame(self.window, bg='#1a1a1a', highlightthickness=0)
         self.frame.pack(fill='both', expand=True, padx=5, pady=5)
 
         # Stats labels with modern styling
@@ -219,38 +225,54 @@ class DesktopStatsWidget:
         )
         self.usage_label.pack(fill='x', padx=10, pady=(5, 0))
 
-        # Allow the topmost to drop after initial display so other windows can cover
-        self.root.after(100, lambda: self.root.attributes('-topmost', False))
+        # Prevent closing the stats window from killing the app
+        self.window.protocol("WM_DELETE_WINDOW", lambda: None)
 
-        # Start periodic visibility refresh
-        self._refresh_visibility()
+        # Run initial full update, then start both update loops
+        self._update_slow()
+        self._update_fast()
 
-        # Start update loop
-        self._update_display()
-
-    def _refresh_visibility(self):
-        """Periodically refresh window visibility."""
-        if not self._running or not self.root:
+    def _update_fast(self):
+        """Fast update loop (every 1s) — only updates the clean timer."""
+        if not self._running or not self.window:
             return
 
         try:
-            # Briefly set topmost then remove - brings window forward if hidden
-            self.root.attributes('-topmost', True)
-            self.root.after(50, lambda: self.root.attributes('-topmost', False))
+            if self._cached_clean_since is not None and self._cached_clean_since > 0:
+                elapsed = int(time.time() - self._cached_clean_since)
+                if elapsed >= 0:
+                    clean_time = self._format_duration(elapsed)
+                    self.clean_label.config(text=f"Clean: {clean_time}")
+
+                    # Color coding based on duration
+                    if elapsed >= 86400 * 7:
+                        self.clean_label.config(fg='#00ff00')
+                    elif elapsed >= 86400:
+                        self.clean_label.config(fg='#00ff88')
+                    elif elapsed >= 3600:
+                        self.clean_label.config(fg='#ffaa00')
+                    else:
+                        self.clean_label.config(fg='#ff4444')
         except Exception:
             pass
 
-        # Schedule next visibility refresh (every 5 seconds)
-        if self._running and self.root:
-            self.root.after(5000, self._refresh_visibility)
+        if self._running and self.window:
+            self.window.after(self.update_interval, self._update_fast)
 
-    def _update_display(self):
-        """Update the stats display."""
-        if not self._running or not self.root:
+    def _update_slow(self):
+        """Slow update loop (every 30s) — updates hours, graph, usage, etc."""
+        if not self._running or not self.window:
             return
 
         try:
             stats = self.get_stats()
+
+            # Cache the clean_since timestamp so fast loop can compute locally
+            if stats.seconds_since_adult_access is not None and stats.seconds_since_adult_access > 0:
+                self._cached_clean_since = time.time() - stats.seconds_since_adult_access
+            else:
+                self._cached_clean_since = None
+                self.clean_label.config(text="Clean: 0:00:00:00", fg='#00aaff')
 
             # Calculate hours
             hours_today = (stats.cycles_today * stats.work_minutes) / 60
@@ -266,28 +288,11 @@ class DesktopStatsWidget:
             if stats.percentage_change:
                 pct, is_increase = stats.percentage_change
                 if pct > 0:
-                    arrow = "\u2191" if is_increase else "\u2193"  # up or down
+                    arrow = "\u2191" if is_increase else "\u2193"
                     color = '#00ff88' if is_increase else '#ff6666'
                     self.change_label.config(text=f"{arrow} {pct:.0f}%", fg=color)
                 else:
                     self.change_label.config(text="--", fg='#888888')
-
-            # Update clean time label
-            if stats.seconds_since_adult_access is not None and stats.seconds_since_adult_access > 0:
-                clean_time = self._format_duration(stats.seconds_since_adult_access)
-                self.clean_label.config(text=f"Clean: {clean_time}")
-
-                # Color coding based on duration
-                if stats.seconds_since_adult_access >= 86400 * 7:  # 7+ days
-                    self.clean_label.config(fg='#00ff00')  # Bright green
-                elif stats.seconds_since_adult_access >= 86400:  # 1+ days
-                    self.clean_label.config(fg='#00ff88')  # Green
-                elif stats.seconds_since_adult_access >= 3600:  # 1+ hours
-                    self.clean_label.config(fg='#ffaa00')  # Orange
-                else:
-                    self.clean_label.config(fg='#ff4444')  # Red
-            else:
-                self.clean_label.config(text="Clean: 0:00:00:00", fg='#00aaff')
 
             # Update bar graph
             self._draw_bar_graph(stats.session_history)
@@ -298,9 +303,9 @@ class DesktopStatsWidget:
         except Exception as e:
             print(f"Error updating desktop stats: {e}")
 
-        # Schedule next update
-        if self._running and self.root:
-            self.root.after(self.update_interval, self._update_display)
+        # Schedule next slow update
+        if self._running and self.window:
+            self.window.after(self._slow_update_interval, self._update_slow)
 
     def _update_usage_summary(self, stats: StatsData) -> None:
         """Update the usage summary label with top apps/websites."""
@@ -413,35 +418,24 @@ class DesktopStatsWidget:
                 except (ValueError, IndexError):
                     pass
 
-    def _run_mainloop(self):
-        """Run the Tkinter main loop in a separate thread."""
-        try:
-            self._create_window()
-            self.root.mainloop()
-        except Exception as e:
-            print(f"Desktop stats widget error: {e}")
-        finally:
-            self._running = False
-
     def start(self):
-        """Start the desktop stats widget."""
+        """Start the desktop stats widget (creates window on main thread)."""
         if self._running:
             return
 
         self._running = True
-        self._thread = threading.Thread(target=self._run_mainloop, daemon=True)
-        self._thread.start()
+        self._create_window()
         print("Desktop stats widget started")
 
     def stop(self):
         """Stop the desktop stats widget."""
         self._running = False
-        if self.root:
+        if self.window:
             try:
-                self.root.after(0, self.root.destroy)
+                self.window.destroy()
             except Exception:
                 pass
-        self.root = None
+        self.window = None
         print("Desktop stats widget stopped")
 
     def is_running(self) -> bool:

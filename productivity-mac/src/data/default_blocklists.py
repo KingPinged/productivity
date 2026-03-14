@@ -8,6 +8,9 @@ ADULT_SITES = [
     # MAJOR TUBE SITES
     # ============================================
     "pornhub.com",
+    "javguru.guru",
+    "javguru.biz",
+    "www.javguru.guru",
     "www.pornhub.com",
     "de.pornhub.com",
     "fr.pornhub.com",

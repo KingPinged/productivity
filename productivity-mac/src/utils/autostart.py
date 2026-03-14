@@ -9,10 +9,11 @@ import sys
 import os
 from pathlib import Path
 
-from src.utils.constants import APP_NAME
+from src.utils.constants import APP_NAME, APP_DATA_DIR
 
 PLIST_LABEL = f"com.{APP_NAME.lower()}.plist"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / PLIST_LABEL
+LOG_DIR = Path.home() / "Library" / "Logs" / APP_NAME
 
 
 def _get_command_args() -> list[str]:
@@ -35,11 +36,24 @@ def enable_autostart() -> bool:
     try:
         program_args = _get_command_args()
 
+        # Determine working directory
+        if getattr(sys, 'frozen', False):
+            working_dir = str(Path(sys.executable).parent)
+        else:
+            working_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+
         plist_data = {
             'Label': PLIST_LABEL,
             'ProgramArguments': program_args,
             'RunAtLoad': True,
-            'KeepAlive': False,
+            # Restart on non-zero exit (force-kill = signal exit).
+            # Clean exit uses sys.exit(0) so launchd won't restart.
+            'KeepAlive': {'Crashed': True},
+            'WorkingDirectory': working_dir,
+            'StandardOutPath': str(LOG_DIR / 'stdout.log'),
+            'StandardErrorPath': str(LOG_DIR / 'stderr.log'),
         }
 
         # Ensure LaunchAgents directory exists

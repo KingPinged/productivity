@@ -1,5 +1,5 @@
-// Productivity Timer - Website Blocker Extension
-// Background script that blocks websites during focus sessions
+// Productivity Timer - Website Blocker Extension (Manifest V3)
+// Background service worker that blocks websites during focus sessions
 // Syncs with the desktop app via local HTTP server
 
 // Server configuration
@@ -34,7 +34,7 @@ let aiCheckInProgress = new Set();  // Domains currently being checked (prevent 
 // Initialize
 async function initialize() {
   // Load saved state
-  const data = await browser.storage.local.get(['blockedSites', 'alwaysBlockedSites', 'whitelistedUrls', 'blockCount', 'punishmentState', 'aiCheckedDomains']);
+  const data = await chrome.storage.local.get(['blockedSites', 'alwaysBlockedSites', 'whitelistedUrls', 'blockCount', 'punishmentState', 'aiCheckedDomains']);
   blockedSites = data.blockedSites || DEFAULT_BLOCKED_SITES;
   alwaysBlockedSites = data.alwaysBlockedSites || [];
   whitelistedUrls = data.whitelistedUrls || [];
@@ -49,15 +49,11 @@ async function initialize() {
   // Check for active punishment on startup
   if (data.punishmentState && data.punishmentState.is_locked) {
     isPunishmentLocked = true;
-    startPunishmentBlocking();
     console.log("Punishment lock active on startup - blocking all traffic");
   }
 
   // Start syncing with desktop app
   startSync();
-
-  // Always start the always-blocked listener (for adult content)
-  startAlwaysBlocking();
 
   updateIcon();
 }
@@ -88,17 +84,10 @@ async function syncWithApp() {
       appConnected = true;
 
       // Update blocking state based on app
-      const wasBlocking = isBlocking;
       isBlocking = status.isBlocking;
 
-      if (isBlocking && !wasBlocking) {
-        // App started blocking - fetch sites and whitelist, then start
-        await fetchBlockedSites();
-        startBlocking();
-      } else if (!isBlocking && wasBlocking) {
-        // App stopped blocking
-        stopBlocking();
-      }
+      // Always sync sites so alwaysBlockedSites stays current
+      await fetchBlockedSites();
 
       updateIcon();
     } else {
@@ -118,7 +107,6 @@ async function syncWithApp() {
     // If we were blocking based on app, stop
     if (isBlocking) {
       isBlocking = false;
-      stopBlocking();
       updateIcon();
     }
 
@@ -137,19 +125,10 @@ async function checkPunishmentStatus() {
 
     if (response.ok) {
       const status = await response.json();
-      await browser.storage.local.set({ punishmentState: status });
-
-      const wasLocked = isPunishmentLocked;
+      await chrome.storage.local.set({ punishmentState: status });
       isPunishmentLocked = status.is_locked;
-
-      if (isPunishmentLocked && !wasLocked) {
-        startPunishmentBlocking();
-      } else if (!isPunishmentLocked && wasLocked) {
-        stopPunishmentBlocking();
-      }
     }
   } catch (error) {
-    // Server unreachable, use cached state
     await checkCachedPunishmentStatus();
   }
 }
@@ -157,22 +136,13 @@ async function checkPunishmentStatus() {
 // Check cached punishment state (used when server is unreachable)
 async function checkCachedPunishmentStatus() {
   try {
-    const data = await browser.storage.local.get(['punishmentState']);
+    const data = await chrome.storage.local.get(['punishmentState']);
     if (data.punishmentState) {
       const status = data.punishmentState;
-      const wasLocked = isPunishmentLocked;
-
-      // Check if lock is still active based on time
       if (status.is_locked && status.lock_time_remaining > 0) {
         isPunishmentLocked = true;
-        if (!wasLocked) {
-          startPunishmentBlocking();
-        }
       } else {
         isPunishmentLocked = false;
-        if (wasLocked) {
-          stopPunishmentBlocking();
-        }
       }
     }
   } catch (error) {
@@ -191,23 +161,20 @@ async function fetchBlockedSites() {
     if (response.ok) {
       const data = await response.json();
 
-      // Update blocked sites
       if (data.sites && data.sites.length > 0) {
         blockedSites = data.sites;
-        await browser.storage.local.set({ blockedSites });
+        await chrome.storage.local.set({ blockedSites });
       }
 
-      // Update always-blocked sites (adult content)
       if (data.alwaysBlocked && data.alwaysBlocked.length > 0) {
         alwaysBlockedSites = data.alwaysBlocked;
-        await browser.storage.local.set({ alwaysBlockedSites });
+        await chrome.storage.local.set({ alwaysBlockedSites });
         console.log('Always-blocked sites loaded:', alwaysBlockedSites.length, 'sites');
       }
 
-      // Update whitelist
       if (data.whitelist) {
         whitelistedUrls = data.whitelist;
-        await browser.storage.local.set({ whitelistedUrls });
+        await chrome.storage.local.set({ whitelistedUrls });
         console.log('Whitelist loaded:', whitelistedUrls);
       }
     }
@@ -218,101 +185,50 @@ async function fetchBlockedSites() {
 
 // Check if a URL is whitelisted
 function isWhitelisted(url) {
-  if (!whitelistedUrls || whitelistedUrls.length === 0) {
-    return false;
-  }
+  if (!whitelistedUrls || whitelistedUrls.length === 0) return false;
 
-  // Normalize the URL for comparison
   const normalizedUrl = url.toLowerCase();
 
   for (const whitelistEntry of whitelistedUrls) {
     const normalizedWhitelist = whitelistEntry.toLowerCase();
 
-    // Check exact match
-    if (normalizedUrl === normalizedWhitelist) {
-      return true;
-    }
+    if (normalizedUrl === normalizedWhitelist) return true;
+    if (normalizedUrl.startsWith(normalizedWhitelist)) return true;
 
-    // Check if URL starts with whitelist entry (for path matching)
-    if (normalizedUrl.startsWith(normalizedWhitelist)) {
-      return true;
-    }
-
-    // Check without protocol
     const urlWithoutProtocol = normalizedUrl.replace(/^https?:\/\//, '');
     const whitelistWithoutProtocol = normalizedWhitelist.replace(/^https?:\/\//, '');
 
-    if (urlWithoutProtocol === whitelistWithoutProtocol) {
-      return true;
-    }
+    if (urlWithoutProtocol === whitelistWithoutProtocol) return true;
+    if (urlWithoutProtocol.startsWith(whitelistWithoutProtocol)) return true;
 
-    if (urlWithoutProtocol.startsWith(whitelistWithoutProtocol)) {
-      return true;
-    }
-
-    // Handle www variants
     const urlNoWww = urlWithoutProtocol.replace(/^www\./, '');
     const whitelistNoWww = whitelistWithoutProtocol.replace(/^www\./, '');
 
-    if (urlNoWww === whitelistNoWww || urlNoWww.startsWith(whitelistNoWww)) {
-      return true;
-    }
+    if (urlNoWww === whitelistNoWww || urlNoWww.startsWith(whitelistNoWww)) return true;
   }
 
   return false;
 }
 
-// Build regex pattern for a list of sites
-function buildPatternForSites(sites) {
-  if (!sites || sites.length === 0) {
-    return null;
+// Check if a URL matches a list of site patterns
+function matchesSiteList(url, sites) {
+  if (!sites || sites.length === 0) return false;
+
+  let hostname;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
   }
 
-  const escaped = sites.map(site => {
-    // Remove protocol and www if present
-    site = site.replace(/^(https?:\/\/)?(www\.)?/, '');
-    // Escape special regex chars
-    return site.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  });
-
-  return new RegExp(`^https?://(www\\.)?(${escaped.join('|')})`, 'i');
-}
-
-// Build regex pattern for session-blocked sites
-function buildBlockPattern() {
-  return buildPatternForSites(blockedSites);
-}
-
-// Build regex pattern for always-blocked sites (adult content)
-function buildAlwaysBlockPattern() {
-  return buildPatternForSites(alwaysBlockedSites);
-}
-
-// Request listener for session-based blocking
-function blockRequest(details) {
-  const url = details.url;
-
-  // First check if URL is whitelisted
-  if (isWhitelisted(url)) {
-    console.log('Whitelisted URL allowed:', url);
-    return {};  // Allow the request
+  for (const site of sites) {
+    const clean = site.replace(/^(https?:\/\/)?(www\.)?/, '').toLowerCase();
+    if (hostname === clean || hostname === 'www.' + clean ||
+        hostname.endsWith('.' + clean)) {
+      return true;
+    }
   }
-
-  const pattern = buildBlockPattern();
-
-  if (pattern && pattern.test(url)) {
-    blockCount++;
-    browser.storage.local.set({ blockCount });
-
-    console.log('Blocked URL:', url);
-
-    // Redirect to blocked page
-    return {
-      redirectUrl: browser.runtime.getURL('blocked.html') + '?url=' + encodeURIComponent(url)
-    };
-  }
-
-  return {};
+  return false;
 }
 
 // Report adult site strike to desktop app
@@ -324,8 +240,7 @@ async function reportAdultStrike() {
     });
     if (response.ok) {
       const data = await response.json();
-      // Store punishment state for block page to access
-      await browser.storage.local.set({ punishmentState: data });
+      await chrome.storage.local.set({ punishmentState: data });
       console.log('Adult strike reported:', data);
     }
   } catch (error) {
@@ -333,122 +248,68 @@ async function reportAdultStrike() {
   }
 }
 
-// Request listener for always-blocked sites (adult content) - ALWAYS ACTIVE
-function alwaysBlockRequest(details) {
-  const url = details.url;
-
-  const pattern = buildAlwaysBlockPattern();
-
-  if (pattern && pattern.test(url)) {
-    blockCount++;
-    browser.storage.local.set({ blockCount });
-
-    console.log('Always-blocked URL:', url);
-
-    // Report strike to desktop app (fire and forget)
-    reportAdultStrike();
-
-    // Redirect to blocked page with adult flag
-    return {
-      redirectUrl: browser.runtime.getURL('blocked.html') + '?url=' + encodeURIComponent(url) + '&adult=1'
-    };
-  }
-
-  return {};
+// Redirect a tab to the blocked page
+function redirectToBlocked(tabId, url, flags = '') {
+  const blockedPageUrl = chrome.runtime.getURL('blocked.html') +
+    '?url=' + encodeURIComponent(url) + flags;
+  chrome.tabs.update(tabId, { url: blockedPageUrl });
 }
 
-// Start always-blocking (for adult content) - runs on extension load
-function startAlwaysBlocking() {
-  // Remove existing listener if any
-  if (browser.webRequest.onBeforeRequest.hasListener(alwaysBlockRequest)) {
-    browser.webRequest.onBeforeRequest.removeListener(alwaysBlockRequest);
+// Check a navigation and block if needed
+function checkAndBlock(tabId, url) {
+  if (!url || url.startsWith('chrome:') || url.startsWith('chrome-extension:') ||
+      url.startsWith('about:') || url.startsWith('edge:')) {
+    return false;
   }
 
-  // Add listener - this is ALWAYS active
-  browser.webRequest.onBeforeRequest.addListener(
-    alwaysBlockRequest,
-    { urls: ["<all_urls>"], types: ["main_frame"] },
-    ["blocking"]
-  );
-
-  console.log("Productivity Timer: Always-blocking started (adult content)");
-  console.log("Always-blocked sites:", alwaysBlockedSites.length);
-}
-
-// Start session-based blocking
-function startBlocking() {
-  // Remove existing listener if any
-  if (browser.webRequest.onBeforeRequest.hasListener(blockRequest)) {
-    browser.webRequest.onBeforeRequest.removeListener(blockRequest);
-  }
-
-  // Add listener
-  browser.webRequest.onBeforeRequest.addListener(
-    blockRequest,
-    { urls: ["<all_urls>"], types: ["main_frame"] },
-    ["blocking"]
-  );
-
-  console.log("Productivity Timer: Session blocking started");
-  console.log("Whitelisted URLs:", whitelistedUrls);
-}
-
-// Stop blocking
-function stopBlocking() {
-  if (browser.webRequest.onBeforeRequest.hasListener(blockRequest)) {
-    browser.webRequest.onBeforeRequest.removeListener(blockRequest);
-  }
-
-  console.log("Productivity Timer: Blocking stopped");
-}
-
-// Request listener for punishment mode - blocks ALL websites
-function punishmentBlockRequest(details) {
-  const url = details.url;
-
-  // Allow extension pages
-  if (url.startsWith(browser.runtime.getURL(''))) {
-    return {};
-  }
-
-  // Allow localhost (for our status server, though it won't work with network disabled)
+  // Allow localhost (for our status server)
   if (url.includes('127.0.0.1') || url.includes('localhost')) {
-    return {};
+    return false;
   }
 
-  console.log('Punishment block - ALL traffic blocked:', url);
-
-  // Redirect to blocked page with punishment flag
-  return {
-    redirectUrl: browser.runtime.getURL('blocked.html') + '?url=' + encodeURIComponent(url) + '&adult=1&punishment=1'
-  };
-}
-
-// Start punishment blocking - blocks ALL internet traffic
-function startPunishmentBlocking() {
-  // Remove existing listener if any
-  if (browser.webRequest.onBeforeRequest.hasListener(punishmentBlockRequest)) {
-    browser.webRequest.onBeforeRequest.removeListener(punishmentBlockRequest);
+  // Punishment mode - block EVERYTHING
+  if (isPunishmentLocked) {
+    console.log('Punishment block - ALL traffic blocked:', url);
+    redirectToBlocked(tabId, url, '&adult=1&punishment=1');
+    return true;
   }
 
-  // Add listener for ALL URLs
-  browser.webRequest.onBeforeRequest.addListener(
-    punishmentBlockRequest,
-    { urls: ["<all_urls>"], types: ["main_frame"] },
-    ["blocking"]
-  );
-
-  console.log("Productivity Timer: PUNISHMENT BLOCKING ACTIVE - All traffic blocked");
-}
-
-// Stop punishment blocking
-function stopPunishmentBlocking() {
-  if (browser.webRequest.onBeforeRequest.hasListener(punishmentBlockRequest)) {
-    browser.webRequest.onBeforeRequest.removeListener(punishmentBlockRequest);
+  // Always-blocked sites (adult content) — ALWAYS active
+  if (matchesSiteList(url, alwaysBlockedSites)) {
+    blockCount++;
+    chrome.storage.local.set({ blockCount });
+    console.log('Always-blocked URL:', url);
+    reportAdultStrike();
+    redirectToBlocked(tabId, url, '&adult=1');
+    return true;
   }
 
-  console.log("Productivity Timer: Punishment blocking stopped");
+  // Session-based blocking — only during focus sessions
+  if (isBlocking && !isWhitelisted(url) && matchesSiteList(url, blockedSites)) {
+    blockCount++;
+    chrome.storage.local.set({ blockCount });
+    console.log('Blocked URL:', url);
+    redirectToBlocked(tabId, url);
+    return true;
+  }
+
+  return false;
 }
+
+// Listen for navigations (MV3 replacement for webRequest blocking)
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  // Only block main frame navigations
+  if (details.frameId !== 0) return;
+  checkAndBlock(details.tabId, details.url);
+});
+
+// Also check on committed (catches redirects)
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId !== 0) return;
+  // Skip if it's already our blocked page
+  if (details.url.includes(chrome.runtime.id)) return;
+  checkAndBlock(details.tabId, details.url);
+});
 
 // Update extension icon based on state
 function updateIcon() {
@@ -462,29 +323,27 @@ function updateIcon() {
     128: "icons/icon128.png"
   };
 
-  browser.browserAction.setIcon({ path: iconPath }).catch(() => {
-    // Fallback if active icons don't exist
-    browser.browserAction.setIcon({ path: {
+  chrome.action.setIcon({ path: iconPath }).catch(() => {
+    chrome.action.setIcon({ path: {
       16: "icons/icon16.png",
       48: "icons/icon48.png",
       128: "icons/icon128.png"
     }});
   });
 
-  // Update badge
   if (isBlocking) {
-    browser.browserAction.setBadgeText({ text: "ON" });
-    browser.browserAction.setBadgeBackgroundColor({ color: "#e74c3c" });
+    chrome.action.setBadgeText({ text: "ON" });
+    chrome.action.setBadgeBackgroundColor({ color: "#e74c3c" });
   } else if (appConnected) {
-    browser.browserAction.setBadgeText({ text: "" });
+    chrome.action.setBadgeText({ text: "" });
   } else {
-    browser.browserAction.setBadgeText({ text: "!" });
-    browser.browserAction.setBadgeBackgroundColor({ color: "#f39c12" });
+    chrome.action.setBadgeText({ text: "!" });
+    chrome.action.setBadgeBackgroundColor({ color: "#f39c12" });
   }
 }
 
 // Listen for messages from popup
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'getStatus') {
     sendResponse({
       isBlocking,
@@ -496,15 +355,9 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       isPunishmentLocked
     });
   } else if (message.action === 'manualToggle') {
-    // Manual toggle only works if app is not connected
     if (!appConnected) {
       isBlocking = !isBlocking;
-      if (isBlocking) {
-        startBlocking();
-      } else {
-        stopBlocking();
-      }
-      browser.storage.local.set({ isBlocking });
+      chrome.storage.local.set({ isBlocking });
       updateIcon();
       sendResponse({ isBlocking });
     } else {
@@ -512,7 +365,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   } else if (message.action === 'resetCount') {
     blockCount = 0;
-    browser.storage.local.set({ blockCount });
+    chrome.storage.local.set({ blockCount });
     sendResponse({ success: true });
   } else if (message.action === 'forceSync') {
     syncWithApp().then(() => {
@@ -540,7 +393,7 @@ async function syncAICache() {
       const data = await response.json();
       if (data.checked_domains && Array.isArray(data.checked_domains)) {
         aiCheckedDomains = new Set(data.checked_domains);
-        await browser.storage.local.set({ aiCheckedDomains: Array.from(aiCheckedDomains) });
+        await chrome.storage.local.set({ aiCheckedDomains: Array.from(aiCheckedDomains) });
       }
     }
   } catch (error) {
@@ -551,59 +404,35 @@ async function syncAICache() {
 // Check if a domain should be sent for AI analysis
 function shouldCheckDomain(domain) {
   if (!domain) return false;
-
-  // Skip if already checked by AI
-  if (aiCheckedDomains.has(domain)) {
-    console.log(`[AI NSFW] Skipping ${domain}: already checked`);
-    return false;
-  }
-
-  // Skip if check already in progress
+  if (aiCheckedDomains.has(domain)) return false;
   if (aiCheckInProgress.has(domain)) return false;
-
-  // Skip internal/browser pages
   if (domain === '127.0.0.1' || domain === 'localhost') return false;
   if (domain.endsWith('.local')) return false;
-
-  // Skip if in static always-blocked list (already handled)
-  const pattern = buildAlwaysBlockPattern();
-  if (pattern && pattern.test('https://' + domain)) {
-    console.log(`[AI NSFW] Skipping ${domain}: in static blocklist`);
-    return false;
-  }
-
-  // Skip if in session blocked list
-  const sessionPattern = buildBlockPattern();
-  if (sessionPattern && sessionPattern.test('https://' + domain)) {
-    console.log(`[AI NSFW] Skipping ${domain}: in session blocklist`);
-    return false;
-  }
-
+  if (matchesSiteList('https://' + domain, alwaysBlockedSites)) return false;
+  if (matchesSiteList('https://' + domain, blockedSites)) return false;
   return true;
 }
 
 // Extract page signals from a tab
 async function extractPageSignals(tabId) {
   try {
-    const results = await browser.tabs.executeScript(tabId, {
-      code: `
-        (function() {
-          const meta = document.querySelector('meta[name="description"]');
-          const metaDesc = meta ? meta.getAttribute('content') || '' : '';
-          const bodyText = (document.body ? document.body.innerText || '' : '').substring(0, 500);
-          return {
-            title: document.title || '',
-            meta_description: metaDesc,
-            body_text: bodyText
-          };
-        })();
-      `
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const meta = document.querySelector('meta[name="description"]');
+        const metaDesc = meta ? meta.getAttribute('content') || '' : '';
+        const bodyText = (document.body ? document.body.innerText || '' : '').substring(0, 500);
+        return {
+          title: document.title || '',
+          meta_description: metaDesc,
+          body_text: bodyText
+        };
+      }
     });
-    if (results && results[0]) {
-      console.log(`[AI NSFW] Extracted signals: title="${results[0].title}", body=${results[0].body_text.length} chars`);
-      return results[0];
+    if (results && results[0] && results[0].result) {
+      console.log(`[AI NSFW] Extracted signals: title="${results[0].result.title}", body=${results[0].result.body_text.length} chars`);
+      return results[0].result;
     }
-    console.log('[AI NSFW] executeScript returned empty results');
     return null;
   } catch (error) {
     console.log('[AI NSFW] executeScript failed:', error.message || error);
@@ -613,7 +442,6 @@ async function extractPageSignals(tabId) {
 
 // Send page signals to backend for AI NSFW check
 async function checkPageContent(tabId, url, domain) {
-  // If not connected yet, try a quick ping before giving up
   if (!appConnected) {
     try {
       const ping = await fetch(`${SERVER_URL}/ping`, { method: 'GET', cache: 'no-cache' });
@@ -625,21 +453,14 @@ async function checkPageContent(tabId, url, domain) {
       // genuinely not running
     }
   }
-  if (!appConnected) {
-    console.log(`[AI NSFW] Skipping ${domain}: app not connected`);
-    return;
-  }
+  if (!appConnected) return;
   if (!shouldCheckDomain(domain)) return;
 
   console.log(`[AI NSFW] Checking domain: ${domain}`);
   aiCheckInProgress.add(domain);
 
   try {
-    // Extract page content (best-effort - proceed even if this fails)
     const signals = await extractPageSignals(tabId);
-    if (!signals) {
-      console.log(`[AI NSFW] No signals extracted for ${domain}, sending domain/URL only`);
-    }
 
     const payload = {
       url: url,
@@ -649,7 +470,6 @@ async function checkPageContent(tabId, url, domain) {
       body_text: signals ? signals.body_text : ''
     };
 
-    console.log(`[AI NSFW] Sending to backend: ${domain}`);
     const response = await fetch(`${SERVER_URL}/check-content`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -659,35 +479,24 @@ async function checkPageContent(tabId, url, domain) {
 
     if (response.ok) {
       const result = await response.json();
-      console.log(`[AI NSFW] Result for ${domain}: is_nsfw=${result.is_nsfw}, confidence=${result.confidence}, method=${result.method}, cached=${result.cached}`);
+      console.log(`[AI NSFW] Result for ${domain}: is_nsfw=${result.is_nsfw}, confidence=${result.confidence}, method=${result.method}`);
 
-      // Don't cache results from 'disabled' or 'no_api_key' - those should be retried after key is set
       if (result.method !== 'disabled' && result.method !== 'no_api_key') {
         aiCheckedDomains.add(domain);
-        await browser.storage.local.set({ aiCheckedDomains: Array.from(aiCheckedDomains) });
-      } else {
-        console.log(`[AI NSFW] Not caching ${domain} (method=${result.method}) - will retry when API key is set`);
+        await chrome.storage.local.set({ aiCheckedDomains: Array.from(aiCheckedDomains) });
       }
 
       if (result.is_nsfw) {
-        console.log(`[AI NSFW] BLOCKED: ${domain} (confidence: ${result.confidence}, method: ${result.method})`);
+        console.log(`[AI NSFW] BLOCKED: ${domain}`);
 
-        // Add to always-blocked list locally
         if (!alwaysBlockedSites.includes(domain)) {
           alwaysBlockedSites.push(domain);
-          await browser.storage.local.set({ alwaysBlockedSites });
+          await chrome.storage.local.set({ alwaysBlockedSites });
         }
 
-        // Redirect the tab to blocked page
-        browser.tabs.update(tabId, {
-          url: browser.runtime.getURL('blocked.html') + '?url=' + encodeURIComponent(url) + '&adult=1&ai=1'
-        });
-
-        // Report adult strike
+        redirectToBlocked(tabId, url, '&adult=1&ai=1');
         reportAdultStrike();
       }
-    } else {
-      console.log(`[AI NSFW] Backend returned HTTP ${response.status} for ${domain}`);
     }
   } catch (error) {
     console.log(`[AI NSFW] Check failed for ${domain}:`, error.message || error);
@@ -704,7 +513,6 @@ async function checkPageContent(tabId, url, domain) {
 function extractDomain(url) {
   try {
     const urlObj = new URL(url);
-    // Remove www. prefix for cleaner tracking
     return urlObj.hostname.replace(/^www\./, '').toLowerCase();
   } catch (e) {
     return null;
@@ -727,16 +535,12 @@ async function reportWebsiteUsage(domain, seconds) {
 
     if (response.ok) {
       console.log(`Usage reported: ${domain} - ${seconds}s`);
-      // Try to send any queued reports
       flushUsageQueue();
     } else {
-      // Queue for later
       usageReportQueue.push(report);
     }
   } catch (error) {
-    // Server unavailable - queue for later
     usageReportQueue.push(report);
-    console.log(`Usage queued (offline): ${domain} - ${seconds}s`);
   }
 }
 
@@ -757,13 +561,11 @@ async function flushUsageQueue() {
       });
 
       if (!response.ok) {
-        // Re-queue if failed
         usageReportQueue.push(report);
       }
     } catch (error) {
-      // Re-queue if error
       usageReportQueue.push(report);
-      break; // Stop trying if server is down
+      break;
     }
   }
 }
@@ -771,10 +573,9 @@ async function flushUsageQueue() {
 // Track the currently active tab
 async function trackActiveTab() {
   try {
-    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
 
     if (tabs.length === 0 || !tabs[0].url) {
-      // No active tab or no URL - report current and clear
       if (currentDomain && trackingStartTime) {
         const seconds = Math.floor((Date.now() - trackingStartTime) / 1000);
         if (seconds > 0) {
@@ -788,20 +589,15 @@ async function trackActiveTab() {
 
     const url = tabs[0].url;
 
-    // Skip internal browser pages
     if (url.startsWith('about:') || url.startsWith('chrome:') ||
-        url.startsWith('moz-extension:') || url.startsWith('chrome-extension:') ||
-        url.startsWith('edge:')) {
+        url.startsWith('chrome-extension:') || url.startsWith('edge:')) {
       return;
     }
 
     const domain = extractDomain(url);
-
     if (!domain) return;
 
-    // Check if domain changed
     if (domain !== currentDomain) {
-      // Report time on previous domain
       if (currentDomain && trackingStartTime) {
         const seconds = Math.floor((Date.now() - trackingStartTime) / 1000);
         if (seconds > 0) {
@@ -809,7 +605,6 @@ async function trackActiveTab() {
         }
       }
 
-      // Start tracking new domain
       currentDomain = domain;
       trackingStartTime = Date.now();
       console.log(`Now tracking: ${domain}`);
@@ -823,71 +618,57 @@ async function trackActiveTab() {
 async function periodicUsageReport() {
   if (currentDomain && trackingStartTime) {
     const seconds = Math.floor((Date.now() - trackingStartTime) / 1000);
-    if (seconds >= 10) {  // Report every 10 seconds of accumulated time
-      console.log(`Periodic report: ${currentDomain} - ${seconds}s`);
+    if (seconds >= 10) {
       reportWebsiteUsage(currentDomain, seconds);
-      trackingStartTime = Date.now();  // Reset tracking start
+      trackingStartTime = Date.now();
     }
   }
 }
 
 // Start usage tracking
 function startUsageTracking() {
-  // Track on tab activation
-  browser.tabs.onActivated.addListener(trackActiveTab);
+  chrome.tabs.onActivated.addListener(trackActiveTab);
 
-  // Track on window focus change
-  browser.windows.onFocusChanged.addListener((windowId) => {
-    if (windowId === browser.windows.WINDOW_ID_NONE) {
-      // Window lost focus - report current usage
+  chrome.windows.onFocusChanged.addListener((windowId) => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) {
       if (currentDomain && trackingStartTime) {
         const seconds = Math.floor((Date.now() - trackingStartTime) / 1000);
         if (seconds > 0) {
           reportWebsiteUsage(currentDomain, seconds);
         }
-        trackingStartTime = Date.now();  // Reset for when focus returns
+        trackingStartTime = Date.now();
       }
     } else {
       trackActiveTab();
     }
   });
 
-  // Track on tab URL change + trigger AI NSFW check on page load complete
-  browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.url && tab.active) {
-      trackActiveTab();
-    }
+  // AI NSFW check when page finishes loading
+  chrome.webNavigation.onCompleted.addListener((details) => {
+    if (details.frameId !== 0) return;
 
-    // AI NSFW check when page finishes loading
-    if (changeInfo.status === 'complete' && tab.url) {
-      console.log(`[AI NSFW] Page loaded: ${tab.url} (active=${tab.active})`);
-      // Skip internal pages
-      if (tab.url.startsWith('about:') || tab.url.startsWith('chrome:') ||
-          tab.url.startsWith('moz-extension:') || tab.url.startsWith('chrome-extension:') ||
-          tab.url.startsWith('edge:')) {
-        return;
-      }
-      const domain = extractDomain(tab.url);
-      if (domain) {
-        checkPageContent(tabId, tab.url, domain);
-      }
+    // Also track the active tab
+    trackActiveTab();
+
+    const url = details.url;
+    if (url.startsWith('about:') || url.startsWith('chrome:') ||
+        url.startsWith('chrome-extension:') || url.startsWith('edge:')) {
+      return;
+    }
+    const domain = extractDomain(url);
+    if (domain) {
+      checkPageContent(details.tabId, url, domain);
     }
   });
 
-  // Periodic reporting for long sessions
-  setInterval(periodicUsageReport, 15000);  // Check every 15 seconds
+  // Periodic reporting
+  setInterval(periodicUsageReport, 15000);
+  setInterval(flushUsageQueue, 30000);
 
-  // Initial tracking
   trackActiveTab();
-
-  // Try to flush queue periodically
-  setInterval(flushUsageQueue, 30000);  // Try every 30 seconds
-
   console.log('Usage tracking started');
 }
 
 // Initialize on load
 initialize();
-
-// Start usage tracking after initialization
 startUsageTracking();

@@ -117,8 +117,11 @@ class TypingChallengeDialog:
 
         # Bind events
         self.input_field.bind("<KeyRelease>", self._on_key_release)
-        self.input_field.bind("<Control-v>", lambda e: "break")  # Block paste
+        self.input_field.bind("<Control-v>", lambda e: "break")  # Block paste (Linux)
         self.input_field.bind("<Control-V>", lambda e: "break")
+        self.input_field.bind("<Command-v>", lambda e: "break")  # Block paste (macOS)
+        self.input_field.bind("<Command-V>", lambda e: "break")
+        self.input_field.bind("<Button-2>", lambda e: "break")   # Block middle-click paste
         self.input_field.bind("<Button-3>", lambda e: "break")   # Block right-click
 
         # Progress display

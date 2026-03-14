@@ -36,16 +36,22 @@ DEFAULT_FREE_TIME_RATIO = 2.0
 DEFAULT_MAX_ADULT_STRIKES = 2  # 3rd attempt triggers punishment
 DEFAULT_PUNISHMENT_HOURS = 2  # Lock duration in hours
 PUNISHMENT_STATE_FILE = APP_DATA_DIR / "punishment_state.json"
-PUNISHMENT_ENFORCEMENT_INTERVAL = 30  # Re-check adapters every 30 seconds
+PUNISHMENT_ENFORCEMENT_INTERVAL = 60  # Re-check adapters every 60 seconds
 
 # Usage tracking settings
 USAGE_DATA_FILE = APP_DATA_DIR / "usage_data.json"
 NSFW_CACHE_FILE = APP_DATA_DIR / "nsfw_cache.json"
 FREE_TIME_BUCKET_FILE = APP_DATA_DIR / "free_time_bucket.json"
-USAGE_TRACKING_INTERVAL = 1  # seconds between tracking checks
+PRODUCTIVITY_CACHE_FILE = APP_DATA_DIR / "productivity_cache.json"
+SESSION_STATE_FILE = APP_DATA_DIR / "session_state.json"
+CLEAN_EXIT_FILE = APP_DATA_DIR / "clean_exit"
+USAGE_TRACKING_INTERVAL = 5  # seconds between tracking checks
 
 # Process blocker settings
-PROCESS_CHECK_INTERVAL = 2  # seconds
+PROCESS_CHECK_INTERVAL = 5  # seconds
+
+# Productivity monitoring
+UNPRODUCTIVE_ALERT_INTERVAL_MINUTES = 30
 
 # Hosts file markers
 HOSTS_MARKER_START = "# === PRODUCTIVITY TIMER BLOCK START ==="

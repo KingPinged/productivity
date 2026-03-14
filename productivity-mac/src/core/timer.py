@@ -210,6 +210,26 @@ class PomodoroTimer:
         """Override the duration of the next break (one-shot, resets after use)."""
         self._next_break_override = seconds
 
+    def restore_work(self, seconds_remaining: int) -> None:
+        """Restore a work session with the given remaining time (for crash recovery)."""
+        with self._lock:
+            self._time_remaining = max(1, seconds_remaining)
+            self._set_state(TimerState.WORKING)
+            if not self._running:
+                self._running = True
+                self._timer_thread = threading.Thread(target=self._run_timer, daemon=True)
+                self._timer_thread.start()
+
+    def restore_break(self, seconds_remaining: int) -> None:
+        """Restore a break session with the given remaining time (for crash recovery)."""
+        with self._lock:
+            self._time_remaining = max(1, seconds_remaining)
+            self._set_state(TimerState.BREAK)
+            if not self._running:
+                self._running = True
+                self._timer_thread = threading.Thread(target=self._run_timer, daemon=True)
+                self._timer_thread.start()
+
     def update_durations(self, work_seconds: int, break_seconds: int) -> None:
         """Update timer durations (takes effect on next session)."""
         self.work_seconds = work_seconds

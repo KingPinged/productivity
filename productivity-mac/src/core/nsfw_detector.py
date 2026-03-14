@@ -4,6 +4,7 @@ Two-tier analysis: free OpenAI Moderation API + cheap GPT-4o-mini for ambiguous 
 """
 
 import json
+import ssl
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
@@ -11,6 +12,15 @@ from datetime import datetime
 from typing import Callable, Optional, Tuple
 
 from src.data.nsfw_cache import NSFWCache, CacheEntry
+
+
+def _make_ssl_context() -> ssl.SSLContext:
+    """Create an SSL context using certifi's CA bundle (macOS Python lacks system certs)."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 @dataclass
@@ -24,8 +34,27 @@ class PageSignals:
 
 
 # Thresholds for two-tier detection
-MODERATION_SAFE_THRESHOLD = 0.4
-MODERATION_NSFW_THRESHOLD = 0.9
+MODERATION_SAFE_THRESHOLD = 0.2
+MODERATION_NSFW_THRESHOLD = 0.85
+
+# Domain substrings that are strong indicators of adult content.
+# If the domain contains any of these, skip Tier 1 and go straight to Tier 2 LLM.
+_SUSPICIOUS_DOMAIN_KEYWORDS = {
+    "porn", "xxx", "sex", "hentai", "xvideo", "xnxx", "xhamster",
+    "redtube", "youporn", "pornhub", "brazzers", "bangbros",
+    "jav", "nhentai", "hanime", "rule34", "e621", "gelbooru",
+    "danbooru", "fakku", "tsumino", "hitomi", "naughty",
+    "onlyfans", "fansly", "chaturbate", "livejasmin", "stripchat",
+    "cam4", "bongacams", "myfreecams", "spankbang", "eporner",
+    "tnaflix", "tube8", "beeg", "motherless", "xvideos",
+    "erotic", "nsfw", "lewd", "smut", "r18", "adult",
+    "boob", "nude", "naked",
+}
+
+# These match the FULL domain (minus TLD) — catches things like njavtv.com
+_SUSPICIOUS_DOMAIN_PATTERNS = {
+    "njav", "jav", "javhd", "javbus", "javlib", "javmost", "javfree",
+}
 
 
 class NSFWDetector:
@@ -47,6 +76,21 @@ class NSFWDetector:
     def update_api_key(self, key: str) -> None:
         """Update the OpenAI API key."""
         self.api_key = key
+
+    @staticmethod
+    def _domain_looks_suspicious(domain: str) -> bool:
+        """Fast heuristic: does the domain name contain known adult keywords?"""
+        # Strip TLD and split on dots/hyphens
+        parts = domain.lower().rsplit('.', 1)[0]  # "njavtv" from "njavtv.com"
+        # Check full subdomain token
+        for pattern in _SUSPICIOUS_DOMAIN_PATTERNS:
+            if pattern in parts:
+                return True
+        # Check each keyword substring
+        for kw in _SUSPICIOUS_DOMAIN_KEYWORDS:
+            if kw in parts:
+                return True
+        return False
 
     def check_content_sync(self, signals: PageSignals) -> dict:
         """
@@ -79,57 +123,61 @@ class NSFWDetector:
                 'method': 'no_api_key',
             }
 
+        # Pre-check: suspicious domain name → skip Tier 1, go straight to Tier 2
+        domain_suspicious = self._domain_looks_suspicious(domain)
+        if domain_suspicious:
+            print(f"[NSFW] Domain '{domain}' looks suspicious — skipping to Tier 2 LLM")
+
         # Build text to analyze
         text = self._build_analysis_text(signals)
-        print(f"[NSFW] Tier 1: Calling Moderation API for {domain} ({len(text)} chars)")
 
-        # Tier 1: Moderation API (free)
-        try:
-            score = self._call_moderation_api(text)
-        except Exception as e:
-            print(f"[NSFW] Moderation API error for {domain}: {e}")
-            # Fail open - don't block on API errors
-            return {
-                'is_nsfw': False,
-                'confidence': 0.0,
-                'cached': False,
-                'method': 'error',
-            }
+        # Tier 1: Moderation API (free) — skip if domain is already suspicious
+        score = 0.0
+        if not domain_suspicious:
+            print(f"[NSFW] Tier 1: Calling Moderation API for {domain} ({len(text)} chars)")
+            try:
+                score = self._call_moderation_api(text)
+            except Exception as e:
+                print(f"[NSFW] Moderation API error for {domain}: {e}")
+                return {
+                    'is_nsfw': False,
+                    'confidence': 0.0,
+                    'cached': False,
+                    'method': 'error',
+                }
 
-        print(f"[NSFW] Tier 1 score for {domain}: {score:.4f}")
+            print(f"[NSFW] Tier 1 score for {domain}: {score:.4f}")
 
-        # Evaluate Tier 1 result
-        if score < MODERATION_SAFE_THRESHOLD:
-            # Safe - cache and return
-            print(f"[NSFW] {domain} -> SAFE (score {score:.4f} < {MODERATION_SAFE_THRESHOLD})")
-            self._cache_result(domain, False, score, 'moderation')
-            return {
-                'is_nsfw': False,
-                'confidence': 1.0 - score,
-                'cached': False,
-                'method': 'moderation',
-            }
+            # Evaluate Tier 1 result
+            if score < MODERATION_SAFE_THRESHOLD:
+                print(f"[NSFW] {domain} -> SAFE (score {score:.4f} < {MODERATION_SAFE_THRESHOLD})")
+                self._cache_result(domain, False, score, 'moderation')
+                return {
+                    'is_nsfw': False,
+                    'confidence': 1.0 - score,
+                    'cached': False,
+                    'method': 'moderation',
+                }
 
-        if score >= MODERATION_NSFW_THRESHOLD:
-            # Clearly NSFW - cache, notify, and return
-            print(f"[NSFW] {domain} -> NSFW (score {score:.4f} >= {MODERATION_NSFW_THRESHOLD})")
-            self._cache_result(domain, True, score, 'moderation')
-            if self.on_nsfw_detected:
-                self.on_nsfw_detected(domain)
-            return {
-                'is_nsfw': True,
-                'confidence': score,
-                'cached': False,
-                'method': 'moderation',
-            }
+            if score >= MODERATION_NSFW_THRESHOLD:
+                print(f"[NSFW] {domain} -> NSFW (score {score:.4f} >= {MODERATION_NSFW_THRESHOLD})")
+                self._cache_result(domain, True, score, 'moderation')
+                if self.on_nsfw_detected:
+                    self.on_nsfw_detected(domain)
+                return {
+                    'is_nsfw': True,
+                    'confidence': score,
+                    'cached': False,
+                    'method': 'moderation',
+                }
 
-        # Ambiguous (0.4 - 0.9) - Tier 2: GPT-4o-mini
-        print(f"[NSFW] {domain} -> AMBIGUOUS (score {score:.4f}), calling Tier 2 LLM...")
+        # Tier 2: GPT-4o-mini — for ambiguous Tier 1 results OR suspicious domains
+        reason = "suspicious domain" if domain_suspicious else f"ambiguous score {score:.4f}"
+        print(f"[NSFW] {domain} -> Tier 2 LLM ({reason})")
         try:
             is_nsfw, confidence = self._call_llm_verification(signals, score)
         except Exception as e:
             print(f"[NSFW] LLM verification error for {domain}: {e}")
-            # Fail open on Tier 2 errors too
             self._cache_result(domain, False, score, 'error')
             return {
                 'is_nsfw': False,
@@ -180,7 +228,8 @@ class NSFWDetector:
         payload = json.dumps({"input": text}).encode()
 
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        ctx = _make_ssl_context()
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
             data = json.loads(resp.read().decode())
 
         # Extract the maximum sexual/nsfw-related score
@@ -237,7 +286,8 @@ class NSFWDetector:
         }).encode()
 
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        ctx = _make_ssl_context()
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
             data = json.loads(resp.read().decode())
 
         content = data["choices"][0]["message"]["content"].strip()

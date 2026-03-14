@@ -179,6 +179,7 @@ class InternetDisabler:
 
         current_time = time.time()
 
+
         if current_time < self.state.lock_end_timestamp:
             # Lock should still be active
             remaining_seconds = self.state.lock_end_timestamp - current_time
@@ -233,13 +234,16 @@ class InternetDisabler:
                 if time.time() >= self.state.lock_end_timestamp:
                     break
 
+                # Get currently enabled services — only these need disabling
+                current_enabled = set(self.get_all_adapters())
+
                 # Re-disable any services that were manually re-enabled
                 for adapter in self.state.disabled_adapters:
-                    self._disable_adapter(adapter)
+                    if adapter in current_enabled:
+                        self._disable_adapter(adapter)
 
-                # Also check for new services
-                current_adapters = self.get_all_adapters()
-                for adapter in current_adapters:
+                # Also disable any new services not previously tracked
+                for adapter in current_enabled:
                     if adapter not in self.state.disabled_adapters:
                         if self._disable_adapter(adapter):
                             self.state.disabled_adapters.append(adapter)

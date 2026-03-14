@@ -412,10 +412,8 @@ class SettingsWindow:
         # Handle auto-start
         if self.autostart_var.get():
             enable_autostart()
-            self.config.auto_start_windows = True
         else:
             disable_autostart()
-            self.config.auto_start_windows = False
 
         # Save config to file
         self.config.save()

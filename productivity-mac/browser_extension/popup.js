@@ -1,4 +1,4 @@
-// Popup script for Productivity Timer Blocker
+// Popup script for Productivity Timer Blocker (Manifest V3)
 
 let isBlocking = false;
 let appConnected = false;
@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Load status from background script
 async function loadStatus() {
   try {
-    const response = await browser.runtime.sendMessage({ action: 'getStatus' });
+    const response = await chrome.runtime.sendMessage({ action: 'getStatus' });
     updateUI(response);
   } catch (error) {
     console.error('Error loading status:', error);
@@ -76,7 +76,6 @@ function updateUI(status) {
   const sites = status.blockedSites || [];
   if (sites.length > 0) {
     const preview = sites.slice(0, 8).map(s => {
-      // Clean up site name for display
       s = s.replace(/^(www\.)?/, '');
       return `<span>${s}</span>`;
     }).join('');
@@ -89,13 +88,10 @@ function updateUI(status) {
 
 // Toggle blocking (only works if app is not connected)
 async function toggleBlocking() {
-  if (appConnected) {
-    // Can't toggle manually when app is connected
-    return;
-  }
+  if (appConnected) return;
 
   try {
-    const response = await browser.runtime.sendMessage({ action: 'manualToggle' });
+    const response = await chrome.runtime.sendMessage({ action: 'manualToggle' });
     if (response.error) {
       console.log(response.error);
     } else {
@@ -113,7 +109,7 @@ async function forceSync() {
   syncBtn.disabled = true;
 
   try {
-    await browser.runtime.sendMessage({ action: 'forceSync' });
+    await chrome.runtime.sendMessage({ action: 'forceSync' });
     await loadStatus();
   } catch (error) {
     console.error('Error syncing:', error);
