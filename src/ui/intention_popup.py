@@ -20,7 +20,6 @@ class IntentionPopup:
         """
         self.parent = parent
         self.on_submit = on_submit
-        self._result = ""
 
         self._build()
 

@@ -50,9 +50,7 @@ class IntentionBar:
         x = (screen_w - bar_w) // 2
         self.win.geometry(f"+{x}+0")
 
-        # Hover bindings
-        self.win.bind("<Enter>", self._on_enter)
-        self.win.bind("<Leave>", self._on_leave)
+        # Hover bindings (only on label — it fills the window, avoids flicker from event bubbling)
         self.label.bind("<Enter>", self._on_enter)
         self.label.bind("<Leave>", self._on_leave)
 
