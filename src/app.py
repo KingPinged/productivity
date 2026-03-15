@@ -34,6 +34,8 @@ from src.ui.desktop_stats import DesktopStatsWidget, StatsData
 from src.ui.usage_stats_window import UsageStatsWindow
 from src.ui.nsfw_popup import NSFWStrikePopup
 from src.ui.toast import TimerToastManager, Toast
+from src.ui.intention_popup import IntentionPopup
+from src.ui.intention_bar import IntentionBar
 from src.core.free_time_bucket import FreeTimeBucket
 
 
@@ -57,6 +59,10 @@ class ProductivityApp:
         self._sets_completed = 0
         self._session_active = False  # True when user has started working on sets
         self._is_blocking = False  # Prevent redundant start/stop blocking calls
+
+        # Session intention
+        self._session_intention: str = ""
+        self._intention_bar: IntentionBar | None = None
 
         # Initialize root window
         self.root = ttk.Window(themename=config.theme)
@@ -654,20 +660,36 @@ class ProductivityApp:
     def _on_start(self) -> None:
         """Handle start/resume/skip-break button click."""
         if self.timer.state == TimerState.IDLE:
-            # Mark session as active when starting first set
             if not self._session_active:
-                self._session_active = True
-                self._sets_completed = 0
-                print(f"Session started: 0/{self.config.sets_per_session} sets")
+                # New session — ask for intention first
+                IntentionPopup(self.root, self._start_session_with_intention)
+                return
             self.timer.start_work()
             self._update_sets_display()
         elif self.timer.state == TimerState.PAUSED:
             self.timer.resume()
         elif self.timer.state == TimerState.BREAK:
-            # Skip break - jump to next work session without quitting cycle
-            # timer.skip() transitions to WORKING which triggers _on_state_change
             print("Break skipped")
             self.timer.skip()
+
+    def _start_session_with_intention(self, intention: str) -> None:
+        """Called after intention popup submits/skips. Starts the session."""
+        self._session_active = True
+        self._sets_completed = 0
+        self._session_intention = intention
+        print(f"Session started: 0/{self.config.sets_per_session} sets")
+        if intention:
+            print(f"Intention: {intention}")
+
+        # Show intention on timer window
+        self.main_window.set_intention(intention)
+
+        # Create top-of-screen bar if intention is set
+        if intention:
+            self._intention_bar = IntentionBar(self.root, intention)
+
+        self.timer.start_work()
+        self._update_sets_display()
 
     def _on_pause(self) -> None:
         """Handle pause button click."""
@@ -738,6 +760,14 @@ class ProductivityApp:
         # Reset sets tracking
         self._session_active = False
         self._sets_completed = 0
+
+        # Clear intention
+        self._session_intention = ""
+        self.main_window.clear_intention()
+        if self._intention_bar is not None:
+            self._intention_bar.destroy()
+            self._intention_bar = None
+
         self._update_sets_display()
 
         self.main_window.update_state(TimerState.IDLE)
