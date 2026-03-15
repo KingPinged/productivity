@@ -1776,7 +1776,6 @@ BLOCKED_APPS = {
         "Apex Legends",
         "PUBG",
         "Roblox",
-        "RobloxStudio",
     ],
 
     "social_media": [
@@ -1876,7 +1875,6 @@ BLOCKED_WEBSITES = {
         "gog.com",
         "www.gog.com",
         "itch.io",
-        "roblox.com",
         "www.roblox.com",
         "minecraft.net",
         "www.minecraft.net",

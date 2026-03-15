@@ -27,6 +27,9 @@ class PunishmentState:
     # Track last adult site access attempt (for stats display)
     last_strike_timestamp: float = 0.0  # Unix timestamp of last strike
 
+    # Date string (YYYY-MM-DD) of last strike for daily reset
+    last_strike_date: str = ""
+
     # Track when the user started being "clean" (no adult site visits)
     # Set on first run, reset whenever a strike occurs
     clean_since_timestamp: float = 0.0
@@ -44,11 +47,14 @@ class PunishmentState:
             try:
                 with open(PUNISHMENT_STATE_FILE, 'r') as f:
                     data = json.load(f)
-                return cls(**data)
+                state = cls(**data)
             except (json.JSONDecodeError, TypeError, KeyError):
                 # Invalid state file, return default
-                return cls()
-        return cls()
+                state = cls()
+        else:
+            state = cls()
+        state._check_daily_reset()
+        return state
 
     def reset(self) -> None:
         """Reset all state (called after punishment ends)."""
@@ -58,11 +64,24 @@ class PunishmentState:
         self.disabled_adapters = []
         self.save()
 
+    def _check_daily_reset(self) -> None:
+        """Reset strike count if the last strike was on a previous day."""
+        if self.is_locked:
+            return
+        from datetime import date
+        today = date.today().isoformat()
+        if self.last_strike_date and self.last_strike_date != today and self.strike_count > 0:
+            self.strike_count = 0
+            self.save()
+
     def add_strike(self) -> int:
         """Add a strike and save. Returns new strike count."""
         import time
+        from datetime import date
+        self._check_daily_reset()
         self.strike_count += 1
         self.last_strike_timestamp = time.time()
+        self.last_strike_date = date.today().isoformat()
         # Reset clean timer - user is no longer clean
         self.clean_since_timestamp = time.time()
         self.save()

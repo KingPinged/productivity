@@ -1791,7 +1791,6 @@ BLOCKED_APPS = {
         "pubg.exe",
         "tslgame.exe",
         "robloxplayerbeta.exe",
-        "robloxstudiobeta.exe",
     ],
 
     "social_media": [
@@ -1897,7 +1896,6 @@ BLOCKED_WEBSITES = {
         "gog.com",
         "www.gog.com",
         "itch.io",
-        "roblox.com",
         "www.roblox.com",
         "minecraft.net",
         "www.minecraft.net",
