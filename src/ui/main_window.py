@@ -2,6 +2,7 @@
 Main window UI for Productivity Timer.
 """
 
+import tkinter as tk
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from typing import Callable, Optional
@@ -88,6 +89,16 @@ class MainWindow:
             bootstyle="secondary"
         )
         self.state_label.pack(pady=(5, 0))
+
+        # Intention label (hidden by default)
+        self.intention_label = tk.Label(
+            timer_frame,
+            text="",
+            font=("Helvetica", 13, "italic"),
+            fg="#8888cc",
+            bg=ttk.Style().lookup("TFrame", "background"),
+        )
+        # Not packed initially — shown when intention is set
 
         # Free time bucket display (hidden by default)
         self.free_time_label = ttk.Label(
@@ -329,3 +340,19 @@ class MainWindow:
             self.sets_label.config(bootstyle="success")
         else:
             self.sets_label.config(bootstyle="warning")
+
+    def set_intention(self, text: str) -> None:
+        """Show or hide the intention label."""
+        if text:
+            display = text
+            if len(display) > 35:
+                display = display[:34] + "\u2026"
+            self.intention_label.configure(text=f"\U0001f3af {display}")
+            self.intention_label.pack(pady=(4, 0))
+        else:
+            self.intention_label.pack_forget()
+
+    def clear_intention(self) -> None:
+        """Clear and hide the intention label."""
+        self.intention_label.configure(text="")
+        self.intention_label.pack_forget()
