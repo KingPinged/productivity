@@ -40,6 +40,8 @@ from src.ui.usage_stats_window import UsageStatsWindow
 from src.ui.toast import TimerToastManager, Toast
 from src.core.free_time_bucket import FreeTimeBucket
 from src.ui.toast_notification import show_unproductive_alert
+from src.ui.intention_popup import IntentionPopup
+from src.ui.intention_bar import IntentionBar
 from src.data.session_state import SessionState
 
 
@@ -63,6 +65,8 @@ class ProductivityApp:
         self._sets_completed = 0
         self._session_active = False  # True when user has started working on sets
         self._is_blocking = False  # Prevent redundant start/stop blocking calls
+        self._session_intention: str = ""
+        self._intention_bar: IntentionBar | None = None
         self._tick_count = 0  # Throttle tooltip updates
 
         # Productivity alert tracking: "app:Discord" -> last alerted minute threshold
@@ -764,10 +768,8 @@ class ProductivityApp:
         """Handle start/resume/skip-break button click."""
         if self.timer.state == TimerState.IDLE:
             if not self._session_active:
-                self._session_active = True
-                self._sets_completed = 0
-                self.tray_icon.set_session_active(True)
-                print(f"Session started: 0/{self.config.sets_per_session} sets")
+                IntentionPopup(self.root, self._start_session_with_intention)
+                return
             self.timer.start_work()
             self._update_sets_display()
             self._save_session_state()
@@ -776,6 +778,25 @@ class ProductivityApp:
         elif self.timer.state == TimerState.BREAK:
             print("Break skipped")
             self.timer.skip()
+
+    def _start_session_with_intention(self, intention: str) -> None:
+        """Called after intention popup submits/skips. Starts the session."""
+        self._session_active = True
+        self._sets_completed = 0
+        self._session_intention = intention
+        self.tray_icon.set_session_active(True)
+        print(f"Session started: 0/{self.config.sets_per_session} sets")
+        if intention:
+            print(f"Intention: {intention}")
+
+        self.main_window.set_intention(intention)
+
+        if intention:
+            self._intention_bar = IntentionBar(self.root, intention)
+
+        self.timer.start_work()
+        self._update_sets_display()
+        self._save_session_state()
 
     def _on_pause(self) -> None:
         """Handle pause button click."""
@@ -843,6 +864,11 @@ class ProductivityApp:
         SessionState.clear()
         self.tray_icon.set_session_active(False)
         self._sets_completed = 0
+        self._session_intention = ""
+        self.main_window.clear_intention()
+        if self._intention_bar is not None:
+            self._intention_bar.destroy()
+            self._intention_bar = None
         self._update_sets_display()
 
         self.main_window.update_state(TimerState.IDLE)
