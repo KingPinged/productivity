@@ -122,8 +122,18 @@ class ProcessGuard:
 
     def watch(self):
         """Main watch loop - respawns app if killed."""
+        import signal
+
         self._running = True
         set_process_priority_low()
+
+        # Handle SIGTERM/SIGINT so guard exits during system shutdown
+        def _stop(signum, frame):
+            print(f"[Guard] Signal {signum} received — exiting")
+            self._running = False
+
+        signal.signal(signal.SIGTERM, _stop)
+        signal.signal(signal.SIGINT, _stop)
 
         # Initial launch
         self.start_main_app()
@@ -222,7 +232,20 @@ def watch_pid(pid: int, guard_id: int = 1, check_interval: int = 3) -> None:
     unless the clean_exit sentinel file exists.
     Also monitors peer guard and respawns it if killed.
     """
+    import signal
     from src.utils.constants import CLEAN_EXIT_FILE
+
+    # Handle SIGTERM/SIGINT so guards exit during system shutdown
+    # instead of racing to respawn the app.
+    _guard_running = True
+
+    def _handle_shutdown_signal(signum, frame):
+        nonlocal _guard_running
+        print(f"[Guard-{guard_id}] Signal {signum} received — exiting")
+        _guard_running = False
+
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
 
     set_process_priority_low()
     main_app = find_main_app()
@@ -235,7 +258,7 @@ def watch_pid(pid: int, guard_id: int = 1, check_interval: int = 3) -> None:
 
     print(f"[Guard-{guard_id}] Watching app PID {pid}, will respawn if killed")
 
-    while True:
+    while _guard_running:
         time.sleep(check_interval)
 
         # --- Check clean exit (both guards should stop) ---
@@ -260,6 +283,11 @@ def watch_pid(pid: int, guard_id: int = 1, check_interval: int = 3) -> None:
 
         # PID is gone — stagger by guard_id so only one guard respawns
         time.sleep(guard_id)
+
+        # Re-check: signal received during stagger sleep means system shutdown
+        if not _guard_running:
+            print(f"[Guard-{guard_id}] Signal received during respawn check — exiting")
+            return
 
         # Re-check: clean exit, or maybe peer already respawned
         if CLEAN_EXIT_FILE.exists():
