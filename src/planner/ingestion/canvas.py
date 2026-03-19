@@ -125,14 +125,21 @@ class CanvasScraper:
         total = 0
 
         # Navigate to courses page to verify session
-        page.goto(f"{canvas_url}/courses", wait_until="domcontentloaded", timeout=30_000)
+        page.goto(f"{canvas_url}/courses", wait_until="networkidle", timeout=30_000)
         if self._is_session_expired(page, canvas_url):
             raise _SessionExpiredError()
 
         # Scrape courses list
-        page.goto(f"{canvas_url}/courses", wait_until="domcontentloaded", timeout=30_000)
         courses_html = page.content()
         courses = parser.extract_course_list(courses_html)
+
+        # Filter to likely current semester courses (contain "Sp26", "Spring 2026", etc.)
+        # Also include courses without semester markers
+        current_markers = ["sp26", "spring 2026", "spr26", "spring26"]
+        filtered = [c for c in courses if any(m in c["name"].lower() for m in current_markers)]
+        if filtered:
+            courses = filtered
+            logger.info("Filtered to %d current semester courses", len(courses))
 
         for course in courses:
             course_id = course["id"]
@@ -142,7 +149,7 @@ class CanvasScraper:
             try:
                 page.goto(
                     f"{canvas_url}/courses/{course_id}/assignments",
-                    wait_until="domcontentloaded", timeout=30_000,
+                    wait_until="networkidle", timeout=30_000,
                 )
                 assignments_html = page.content()
                 assignments = parser.parse_assignments_page(assignments_html, course_id, course_name)

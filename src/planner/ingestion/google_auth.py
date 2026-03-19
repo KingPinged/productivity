@@ -1,6 +1,10 @@
 import json
+import os
 import secrets
 from typing import Any
+
+# Suppress oauthlib scope change warning — Google always adds 'openid' to returned scopes
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 import keyring
 from google.oauth2.credentials import Credentials
@@ -10,6 +14,7 @@ KEYRING_SERVICE = "productivity-planner"
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/userinfo.email",
 ]
 
 
@@ -26,8 +31,22 @@ class GoogleAuthManager:
         self._pending_states: dict[str, Flow] = {}
 
     def generate_auth_url(self) -> tuple[str, str]:
+        # Normalize config: handle both "installed" and "web" client types
+        config = self._client_config
+        if "installed" in config and "web" not in config:
+            # Convert installed config to work with our redirect URI
+            installed = config["installed"]
+            config = {
+                "web": {
+                    "client_id": installed["client_id"],
+                    "client_secret": installed["client_secret"],
+                    "auth_uri": installed.get("auth_uri", "https://accounts.google.com/o/oauth2/auth"),
+                    "token_uri": installed.get("token_uri", "https://oauth2.googleapis.com/token"),
+                    "redirect_uris": [self._redirect_uri],
+                }
+            }
         flow = Flow.from_client_config(
-            self._client_config,
+            config,
             scopes=self._scopes,
             redirect_uri=self._redirect_uri,
         )
@@ -47,10 +66,51 @@ class GoogleAuthManager:
             raise ValueError("Invalid or expired OAuth state parameter")
         flow.fetch_token(code=code)
         credentials = flow.credentials
-        from googleapiclient.discovery import build
-        service = build("oauth2", "v2", credentials=credentials)
-        user_info = service.userinfo().get().execute()
-        email = user_info["email"]
+
+        # Get user email — try ID token first (no extra API call), fall back to userinfo
+        email = None
+
+        # Method 1: Extract from ID token if available
+        if hasattr(credentials, 'id_token') and credentials.id_token:
+            try:
+                from google.auth.transport.requests import Request
+                from google.oauth2 import id_token as id_token_module
+                id_info = id_token_module.verify_oauth2_token(
+                    credentials.id_token, Request(),
+                    audience=credentials.client_id,
+                    clock_skew_in_seconds=10,
+                )
+                email = id_info.get("email")
+            except Exception:
+                pass
+
+        # Method 2: Use userinfo API
+        if not email:
+            try:
+                from googleapiclient.discovery import build
+                service = build("oauth2", "v2", credentials=credentials)
+                user_info = service.userinfo().get().execute()
+                email = user_info.get("email")
+            except Exception:
+                pass
+
+        # Method 3: Use token info endpoint directly
+        if not email:
+            import urllib.request
+            token = credentials.token
+            url = f"https://www.googleapis.com/oauth2/v3/userinfo"
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    import json as _json
+                    data = _json.loads(resp.read().decode())
+                    email = data.get("email")
+            except Exception:
+                pass
+
+        if not email:
+            raise ValueError("Could not determine email from OAuth credentials")
+
         return credentials, email
 
     def store_tokens(self, email: str, token_data: dict) -> None:
