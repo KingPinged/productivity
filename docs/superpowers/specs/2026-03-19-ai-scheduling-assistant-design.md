@@ -43,13 +43,28 @@ Existing Tkinter App (orchestrator)
 
 ### Process Model
 - **Existing Tkinter app** remains the primary process and orchestrator
-- **FastAPI backend** runs as a subprocess on `localhost:8321`
-- **React frontend** is bundled as static files served by FastAPI, displayed in a pywebview window
-- Communication between Tkinter app and FastAPI via local HTTP
+- **FastAPI backend** runs as a subprocess on `127.0.0.1:8321` (localhost only, not `0.0.0.0`)
+- **React frontend** is pre-built and bundled as static files served by FastAPI, displayed in a pywebview window
+- Communication between Tkinter app and FastAPI via local HTTP, authenticated with a per-session bearer token
+
+### API Security
+- On startup, the Tkinter app generates a cryptographically random bearer token (32 bytes, `secrets.token_urlsafe()`)
+- Token is passed to the FastAPI subprocess via environment variable
+- All FastAPI endpoints require `Authorization: Bearer <token>` header
+- Token is injected into the React app config at serve time
+- CORS restricted to pywebview origin only
+- Server binds exclusively to `127.0.0.1` (not accessible from network)
+
+### Subprocess Lifecycle
+- **Startup:** Tkinter launches FastAPI subprocess, polls `GET /health` until ready (timeout 10s, then retry or show error)
+- **Health check:** FastAPI exposes `GET /health` (unauthenticated) returning `{"status": "ok"}`
+- **Shutdown:** Tkinter sends SIGTERM (Unix) or calls `terminate()` (Windows) on exit; FastAPI registers `atexit` handler for cleanup
+- **Crash recovery:** Tkinter monitors subprocess; if it dies, restarts automatically (max 3 restarts, then shows error to user)
+- **Port conflict:** If port 8321 is in use, tries ports 8322-8325 sequentially; selected port communicated to pywebview
 
 ### Integration with Existing App
 - Tray icon gets a new menu item: "Open Planner"
-- FastAPI reads `usage_data.json` from the existing app for usage patterns
+- FastAPI reads usage data from the existing app via a local HTTP endpoint on the Tkinter app's extension server (`127.0.0.1:52525/usage`), avoiding file locking issues with direct `usage_data.json` reads
 - When "AI time management" is enabled, the pomodoro timer becomes optional — AI schedule blocks replace it
 - Blocking, NSFW detection, and usage tracking continue to operate independently
 
@@ -63,7 +78,8 @@ Existing Tkinter App (orchestrator)
 - User adds Gmail accounts via Settings in the planner UI
 - OAuth 2.0 flow opens browser for Google consent (scopes: `gmail.readonly`, `calendar.readonly`)
 - Redirect to `localhost:8321/auth/callback` captures tokens
-- Tokens stored encrypted (Fernet) in SQLite
+- OAuth flow must include a `state` parameter (random nonce) validated on callback to prevent CSRF
+- Tokens stored in OS credential store (Windows Credential Manager via `keyring` library, macOS Keychain)
 - Refresh tokens handle automatic re-authentication
 - Supports 3+ accounts (personal, school, work)
 
@@ -101,14 +117,18 @@ Existing Tkinter App (orchestrator)
 **Sync Frequency:** Every 2 hours (Canvas data changes slowly). Manual force-refresh available.
 
 **Resilience:**
-- If session expires, app notifies user to re-login
-- Retry logic with graceful failure — missing Canvas data doesn't break the system
+- Session expiry detected by: HTTP 401/403 responses, redirect to SSO login page, expected DOM elements missing from scraped pages
+- On expiry: in-app banner notification in the planner UI + system notification prompting re-login
+- Retry logic: max 2 retries with 30s delay before marking session as expired
+- Graceful failure — missing Canvas data doesn't break the system; schedule continues with existing cached data
+- Distinguishes transient errors (network timeout → retry silently) from auth errors (SSO redirect → notify user)
 
 ### 3.4 App/Website Usage Patterns (Existing Data)
 
-- Reads `usage_data.json` from the existing productivity app
+- Fetches usage data from the existing app's extension server (`127.0.0.1:52525/usage`) to avoid file locking conflicts
 - Extracts: daily usage patterns, most productive hours, time spent per app/site
 - Used by AI to understand when the user works best and schedule accordingly
+- Usage data path is platform-aware: resolved via the same constants module used by the existing app, or passed as a config parameter when launching the FastAPI subprocess
 
 ---
 
@@ -186,12 +206,20 @@ The AI engine autonomously generates and maintains a time-blocked daily schedule
 - User hasn't started a block after 10 min -> AI nudges or reschedules
 - User manually moves/skips a block in the UI
 
-### 4.5 Token Efficiency
+### 4.5 Error Handling
+
+- **API down / network error:** Keep the last valid schedule as fallback. Show a degraded-mode indicator in the UI ("AI offline — showing last schedule"). Retry with exponential backoff (5s, 15s, 60s, then every 5 min).
+- **Malformed JSON:** Validate Claude's output against a JSON schema before accepting. If validation fails, retry once with a repair prompt. If still invalid, keep previous schedule.
+- **Schedule conflicts:** Post-process Claude's output to detect overlapping blocks. If found, reject and retry with explicit "no overlaps" instruction.
+- **Invalid API key / rate limited:** Surface error in Settings view with clear message. Rate limit → back off per Anthropic retry headers.
+- **Stale schedule indicator:** If the schedule is >4 hours old and hasn't been refreshed, show a subtle "last updated X hours ago" badge.
+
+### 4.6 Token Efficiency
 
 - Full replan only when data materially changes
 - Minor adjustments handled with smaller prompts
 - Schedule template cached — Claude modifies rather than regenerates from scratch
-- Estimated cost: ~$0.10-0.30/day (Sonnet for routine replans, Opus for morning full plan)
+- **Token budget estimate:** Morning full plan ~4,000 input tokens (context) + ~1,500 output tokens. Routine replans ~2,000 input + ~800 output. At ~5-8 replans/day using Sonnet, estimated cost: ~$0.05-0.15/day. Morning Opus plan adds ~$0.10.
 
 ---
 
@@ -247,7 +275,7 @@ The AI engine autonomously generates and maintains a time-blocked daily schedule
 **Week View:**
 - 7-day calendar grid with all events and scheduled blocks
 - Overview of upcoming deadlines and workload distribution
-- Read-only for scheduling (detailed scheduling on Today view only)
+- Read-only for manual scheduling — the AI handles future day planning autonomously; manual intervention is only needed for today's schedule where real-time adjustments matter
 
 **Settings View:**
 - Account management: add/remove Gmail and Google Calendar accounts
@@ -278,9 +306,11 @@ The AI engine autonomously generates and maintains a time-blocked daily schedule
 - **Quiet hours:** Configurable window where only urgent deadline reminders fire
 
 ### 6.3 Nudge System
-- AI monitors usage tracker — if user is on unproductive app during a study block, it nudges
+- AI monitors usage tracker — checks if user is on an unproductive app during a study block (using aggregate productivity status, not specific app names)
+- Only aggregate usage patterns (e.g., "productive hours per day", "peak hours") are sent to Claude API for scheduling context — specific app/website names stay local
 - After 2 ignored nudges, AI silently reschedules that block to later
 - No punishment, just adaptation
+- Nudge system is enabled by default but can be toggled off in preferences
 
 ---
 
@@ -289,16 +319,15 @@ The AI engine autonomously generates and maintains a time-blocked daily schedule
 ### Tables
 
 ```sql
--- OAuth tokens for Gmail/GCal (encrypted at rest)
+-- Gmail/GCal accounts (tokens stored in OS credential store, not here)
 accounts (
   id INTEGER PRIMARY KEY,
-  email TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
   provider TEXT DEFAULT 'google',
-  access_token TEXT NOT NULL,       -- Fernet encrypted
-  refresh_token TEXT NOT NULL,      -- Fernet encrypted
   scopes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  last_sync TIMESTAMP
+  last_sync TIMESTAMP,
+  deleted_at TIMESTAMP              -- soft delete
 )
 
 -- Canvas scraping sessions
@@ -392,9 +421,32 @@ ai_context_cache (
 )
 ```
 
-### Encryption
-- OAuth tokens and Canvas cookies encrypted at rest using `cryptography.Fernet`
-- Key derived from a machine-specific identifier (no user password required)
+### Encryption & Credential Storage
+- OAuth tokens and refresh tokens stored in the OS credential store (Windows Credential Manager via `keyring`, macOS Keychain) — not in SQLite
+- Canvas session cookies encrypted at rest using `cryptography.Fernet` in SQLite, with the Fernet key stored in the OS credential store
+- The `accounts` table stores email and metadata only; tokens are retrieved from the OS credential store at runtime using `keyring.get_password("productivity-planner", email)`
+
+### Timezone Handling
+- All timestamps stored in UTC internally (SQLite TIMESTAMP columns)
+- Google Calendar timezone data preserved in `raw_data` JSON and converted to UTC on import
+- Canvas deadlines assumed to be in the university's timezone (configurable in preferences)
+- Display layer converts UTC to user's local timezone
+
+### Schedule Block / Task Relationships
+- Multiple schedule blocks can reference the same task (e.g., studying for an exam split across morning and afternoon)
+- When a task is marked complete, all its future schedule blocks are automatically marked as "completed" and their time is reclaimed for replanning
+- When a task is deleted, associated future schedule blocks are marked "rescheduled" and removed from the schedule; past completed blocks are preserved for history
+- Rest/buffer blocks have `task_id = NULL`
+
+### Account & Data Cleanup
+- When an account is removed (`DELETE /auth/accounts/:id`): credentials removed from OS credential store, associated events and tasks are soft-deleted (marked with `deleted_at` timestamp), schedule blocks referencing those tasks are marked "rescheduled"
+- `DELETE /canvas/configs/:id` endpoint removes Canvas configuration; associated tasks and events follow the same soft-delete cascade
+- Historical schedule data (completed blocks) is preserved for analytics even after account removal
+
+### Deduplication Strategy
+- Gmail-sourced tasks: deduplication key is `gmail:<message_id>:<task_index>` where `task_index` is the position of the extracted task within a single email
+- Canvas-sourced tasks: deduplication key is `canvas:<course_id>:<assignment_id>`
+- Calendar events: deduplication key is `gcal:<calendar_id>:<event_id>`
 
 ---
 
@@ -405,7 +457,7 @@ ai_context_cache (
 GET  /auth/google          -> Initiates OAuth flow (opens browser)
 GET  /auth/callback        -> OAuth redirect handler
 GET  /auth/accounts        -> List connected accounts
-DELETE /auth/accounts/:id  -> Remove account
+DELETE /auth/accounts/:id  -> Remove account (soft-delete + cascade)
 ```
 
 ### Data Sync
@@ -414,6 +466,7 @@ POST /sync/trigger         -> Force sync all sources
 GET  /sync/status          -> Sync status per source (last sync time, errors)
 POST /canvas/setup         -> Configure Canvas URL, launch login browser
 POST /canvas/relogin       -> Re-authenticate Canvas session
+DELETE /canvas/configs/:id -> Remove Canvas configuration (soft-delete + cascade)
 ```
 
 ### Schedule & Tasks
