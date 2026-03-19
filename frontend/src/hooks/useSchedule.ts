@@ -19,5 +19,21 @@ export function useSchedule(date: string) {
 
   useEffect(() => { load() }, [load])
 
-  return { schedule, loading, reload: load }
+  const updateBlock = useCallback(async (blockId: number, updates: Record<string, string>) => {
+    await apiFetch(`/api/schedule/${blockId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    })
+    await load()
+  }, [load])
+
+  const triggerReplan = useCallback(async () => {
+    await apiFetch('/api/schedule/replan', {
+      method: 'POST',
+      body: JSON.stringify({ date }),
+    })
+    await load()
+  }, [date, load])
+
+  return { schedule, loading, updateBlock, triggerReplan, reload: load }
 }
