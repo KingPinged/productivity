@@ -145,6 +145,73 @@ class CanvasScraper:
             course_id = course["id"]
             course_name = course["name"]
 
+            # Extract course code from name (e.g., "Sp26 - MOBILE COMPUTING (53365)" -> "MOBILE COMPUTING")
+            import re
+            code_match = re.search(r'-\s*(.+?)(?:\s*\(\d+\))?$', course_name)
+            course_code = code_match.group(1).strip() if code_match else course_name
+
+            # Scrape syllabus
+            syllabus_url = None
+            syllabus_text = None
+            try:
+                page.goto(
+                    f"{canvas_url}/courses/{course_id}/assignments/syllabus",
+                    wait_until="networkidle", timeout=30_000,
+                )
+                syl_el = page.query_selector('#course_syllabus')
+                if syl_el:
+                    syllabus_text = syl_el.inner_text().strip()
+                    # Check for external syllabus links
+                    syl_links = syl_el.query_selector_all('a')
+                    for link in syl_links:
+                        href = link.get_attribute('href') or ''
+                        if href and ('syllabus' in href.lower() or href.startswith('http')):
+                            syllabus_url = href
+                            break
+                    # If syllabus text is just a link, the URL is the syllabus
+                    if not syllabus_url and syllabus_text and syllabus_text.startswith('http'):
+                        syllabus_url = syllabus_text.split('\n')[0].strip()
+
+                # Also check for syllabus file links on the syllabus page
+                if not syllabus_url:
+                    file_links = page.query_selector_all('a[href*="/files/"]')
+                    for fl in file_links:
+                        text = fl.inner_text().strip().lower()
+                        href = fl.get_attribute('href') or ''
+                        if 'syllabus' in text or 'syllabus' in href.lower():
+                            syllabus_url = href
+                            break
+            except Exception as e:
+                logger.warning("Failed to scrape syllabus for %s: %s", course_name, e)
+
+            # If still no syllabus, check files page
+            if not syllabus_url:
+                try:
+                    page.goto(
+                        f"{canvas_url}/courses/{course_id}/files",
+                        wait_until="networkidle", timeout=30_000,
+                    )
+                    files_html = page.content()
+                    import re as re_mod
+                    syl_files = re_mod.findall(
+                        r'"url":"([^"]*)"[^}]*"display_name":"([^"]*[Ss]yllabus[^"]*)"',
+                        files_html,
+                    )
+                    if syl_files:
+                        syllabus_url = syl_files[0][0]
+                except Exception as e:
+                    logger.warning("Failed to check files for syllabus: %s", e)
+
+            # Save course info
+            self._db.upsert_course(
+                canvas_course_id=course_id,
+                name=course_name,
+                code=course_code,
+                syllabus_url=syllabus_url,
+                syllabus_text=syllabus_text,
+                canvas_config_id=config_id,
+            )
+
             # Scrape assignments
             try:
                 page.goto(
