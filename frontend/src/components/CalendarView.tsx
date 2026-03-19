@@ -67,23 +67,26 @@ export default function CalendarView({ mode }: CalendarViewProps) {
     return [...eventItems, ...blockItems]
   }, [events, schedule])
 
-  const handleEventClick = useCallback((info: { event: { extendedProps: { type: string; block?: ScheduleBlock } } }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleEventClick = useCallback((info: any) => {
     const props = info.event.extendedProps
     if (props.type === 'block' && props.block) {
-      setSelectedBlock(props.block)
+      setSelectedBlock(props.block as ScheduleBlock)
     }
   }, [])
 
-  const handleEventDrop = useCallback(async (info: { event: { extendedProps: { type: string; block?: ScheduleBlock }; start: Date | null; end: Date | null }; revert: () => void }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleEventDrop = useCallback(async (info: any) => {
     const props = info.event.extendedProps
     if (props.type !== 'block' || !props.block) {
       info.revert()
       return
     }
+    const block = props.block as ScheduleBlock
     try {
-      const newStart = info.event.start?.toTimeString().slice(0, 5) || props.block.start_time
-      const newEnd = info.event.end?.toTimeString().slice(0, 5) || props.block.end_time
-      await updateBlock(props.block.id, { start_time: newStart, end_time: newEnd })
+      const newStart = info.event.start?.toTimeString().slice(0, 5) || block.start_time
+      const newEnd = info.event.end?.toTimeString().slice(0, 5) || block.end_time
+      await updateBlock(block.id, { start_time: newStart, end_time: newEnd })
       await triggerReplan()
     } catch {
       info.revert()
