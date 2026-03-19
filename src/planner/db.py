@@ -449,6 +449,62 @@ class PlannerDB:
             conn.execute("DELETE FROM schedule_blocks WHERE date = ?", (date,))
         conn.commit()
 
+    # --- Reminder CRUD ---
+
+    def add_reminder(
+        self,
+        remind_at: str,
+        reminder_type: str,
+        message: str,
+        schedule_block_id: int | None = None,
+        task_id: int | None = None,
+        urgent: bool = False,
+    ) -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            """INSERT INTO reminders (schedule_block_id, task_id, remind_at,
+               reminder_type, message, urgent)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (schedule_block_id, task_id, remind_at, reminder_type, message, int(urgent)),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_pending_reminders(self) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM reminders WHERE fired = 0 ORDER BY remind_at"
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def get_due_reminders(self, current_time: str) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM reminders WHERE fired = 0 AND remind_at <= ? ORDER BY remind_at",
+            (current_time,),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def mark_reminder_fired(self, reminder_id: int) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE reminders SET fired = 1 WHERE id = ?", (reminder_id,)
+        )
+        conn.commit()
+
+    def clear_reminders_for_date(self, date: str) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "DELETE FROM reminders WHERE remind_at LIKE ?", (f"{date}%",)
+        )
+        conn.commit()
+
     # --- AI Context Cache ---
 
     def save_ai_cache(self, date, context_hash, schedule_json, tokens_used):
