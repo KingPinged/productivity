@@ -105,7 +105,7 @@ def create_app(
     encryption = EncryptionManager()
 
     # Sync scheduler
-    scheduler = SyncScheduler(db, auth_module.auth_manager)
+    scheduler = SyncScheduler(db, auth_module.auth_manager, encryption)
     scheduler.start()
     sync_module.sync_callback = scheduler.sync_all
     app.include_router(sync_module.router)

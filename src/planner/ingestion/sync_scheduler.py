@@ -5,23 +5,31 @@ from src.planner.db import PlannerDB
 from src.planner.ingestion.google_auth import GoogleAuthManager
 from src.planner.ingestion.gcal import GCalSyncer
 from src.planner.ingestion.gmail import GmailSyncer
+from src.planner.ingestion.canvas import CanvasScraper
+from src.planner.encryption import EncryptionManager
 
 logger = logging.getLogger(__name__)
 
 class SyncScheduler:
-    def __init__(self, db: PlannerDB, auth_manager: GoogleAuthManager | None = None):
+    def __init__(self, db: PlannerDB, auth_manager: GoogleAuthManager | None = None, encryption: EncryptionManager | None = None):
         self._db = db
         self._auth_manager = auth_manager
         self._gcal_syncer = GCalSyncer(db)
         self._gmail_syncer = GmailSyncer(db)
+        self._canvas_scraper = CanvasScraper(db, encryption) if encryption else None
         self._scheduler = BackgroundScheduler()
         self._lock = threading.Lock()
 
-    def start(self, interval_minutes: int = 15) -> None:
+    def start(self, google_interval_minutes: int = 15, canvas_interval_minutes: int = 120) -> None:
         self._scheduler.add_job(
-            self.sync_all, "interval", minutes=interval_minutes,
-            id="sync_all", replace_existing=True,
+            self.sync_all, "interval", minutes=google_interval_minutes,
+            id="sync_google", replace_existing=True,
         )
+        if self._canvas_scraper:
+            self._scheduler.add_job(
+                self.sync_canvas, "interval", minutes=canvas_interval_minutes,
+                id="sync_canvas", replace_existing=True,
+            )
         self._scheduler.start()
 
     def stop(self) -> None:
@@ -51,4 +59,23 @@ class SyncScheduler:
                 except Exception as e:
                     logger.error("Failed to sync %s: %s", email, e)
                     results[email] = -1
+            return results
+
+    def sync_canvas(self) -> dict[str, int]:
+        """Sync all Canvas configs. Returns dict of url -> task count."""
+        if not self._canvas_scraper:
+            return {}
+        with self._lock:
+            results = {}
+            configs = self._db.list_canvas_configs()
+            for config in configs:
+                if config["status"] != "active":
+                    continue
+                try:
+                    count = self._canvas_scraper.sync_config(config["id"])
+                    results[config["canvas_url"]] = count
+                    logger.info("Canvas sync %s: %d tasks", config["canvas_url"], count)
+                except Exception as e:
+                    logger.error("Canvas sync failed for %s: %s", config["canvas_url"], e)
+                    results[config["canvas_url"]] = -1
             return results
