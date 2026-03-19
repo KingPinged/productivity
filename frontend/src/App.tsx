@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar'
 import CalendarView from './components/CalendarView'
 import SettingsView from './components/SettingsView'
 import TasksView from './components/TasksView'
+import CoursesView from './components/CoursesView'
 import ContextInput from './components/ContextInput'
 import DaySummary from './components/DaySummary'
 import ReminderToast from './components/ReminderToast'
@@ -10,7 +11,7 @@ import { useUserContext } from './hooks/useUserContext'
 import { useSummary } from './hooks/useSummary'
 import { useSchedule } from './hooks/useSchedule'
 
-type View = 'today' | 'tasks' | 'week' | 'settings'
+type View = 'today' | 'tasks' | 'week' | 'courses' | 'settings'
 
 export default function App() {
   const [view, setView] = useState<View>('today')
@@ -49,6 +50,7 @@ export default function App() {
         {view === 'week' && <CalendarView mode="week" />}
         {view === 'settings' && <SettingsView />}
         {view === 'tasks' && <TasksView />}
+        {view === 'courses' && <CoursesView />}
       </main>
       <ReminderToast />
     </div>

@@ -66,3 +66,15 @@ export interface Task {
   grade_weight: number | null
   current_grade: string | null
 }
+
+export interface Course {
+  id: number
+  canvas_course_id: string
+  name: string
+  code: string | null
+  syllabus_url: string | null
+  syllabus_text: string | null
+  instructor: string | null
+  schedule_info: string | null
+  updated_at: string | null
+}

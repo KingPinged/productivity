@@ -3,7 +3,7 @@ import { useSchedule } from '../hooks/useSchedule'
 import { useTasks } from '../hooks/useTasks'
 import type { ScheduleBlock } from '../types'
 
-type View = 'today' | 'tasks' | 'week' | 'settings'
+type View = 'today' | 'tasks' | 'week' | 'courses' | 'settings'
 
 interface SidebarProps {
   currentView: View
@@ -14,6 +14,7 @@ const navItems: { view: View; label: string; icon: string }[] = [
   { view: 'today', label: 'Today', icon: '\u2600' },
   { view: 'tasks', label: 'Tasks', icon: '\u2611' },
   { view: 'week', label: 'Week', icon: '\u{1F4C5}' },
+  { view: 'courses', label: 'Courses', icon: '\u{1F393}' },
   { view: 'settings', label: 'Settings', icon: '\u2699' },
 ]
 
