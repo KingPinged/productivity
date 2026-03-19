@@ -516,7 +516,7 @@ src/
       gmail.py                     # Gmail OAuth + email parsing
       gcal.py                      # Google Calendar sync
       canvas.py                    # Playwright Canvas scraper
-      usage.py                     # Reads existing usage_data.json
+      usage.py                     # Fetches usage data from extension server HTTP endpoint
 
     ai/                            # AI scheduling engine
       __init__.py
