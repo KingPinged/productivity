@@ -16,6 +16,9 @@ from src.planner.api import events as events_module
 from src.planner.api import sync as sync_module
 from src.planner.api import canvas as canvas_module
 from src.planner.api import tasks as tasks_module
+from src.planner.api import reminders as reminders_module
+from src.planner.reminders.service import ReminderService
+from src.planner.reminders.notifier import Notifier
 from src.planner.ai.scheduler import AIScheduler
 from src.planner.db import PlannerDB
 from src.planner.ingestion.google_auth import GoogleAuthManager
@@ -129,6 +132,23 @@ def create_app(
     for route in tasks_module.router.routes:
         route.dependencies = [require_token]
     app.include_router(tasks_module.router)
+
+    # Reminder routes and service
+    app.dependency_overrides[reminders_module.get_db] = get_db
+    for route in reminders_module.router.routes:
+        route.dependencies = [require_token]
+    app.include_router(reminders_module.router)
+
+    # Reminder service (check every 30 seconds)
+    notifier = Notifier()
+    reminder_service = ReminderService(db, notifier)
+    scheduler._scheduler.add_job(
+        reminder_service.check_and_fire,
+        "interval",
+        seconds=30,
+        id="check_reminders",
+        replace_existing=True,
+    )
 
     serve_dir = static_dir or STATIC_DIR
     if serve_dir.exists():

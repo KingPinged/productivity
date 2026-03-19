@@ -10,6 +10,9 @@ const FIELDS = [
   { key: 'break_frequency', label: 'Break Every (min)', type: 'number', default: '90' },
   { key: 'study_block_length', label: 'Study Block Length (min)', type: 'number', default: '60' },
   { key: 'schedule_style', label: 'Schedule Style', type: 'select', default: 'balanced', options: ['packed', 'balanced', 'relaxed'] },
+  { key: 'quiet_hours_start', label: 'Quiet Hours Start', type: 'time', default: '23:00' },
+  { key: 'quiet_hours_end', label: 'Quiet Hours End', type: 'time', default: '07:00' },
+  { key: 'nudge_enabled', label: 'Nudge System', type: 'select', default: 'enabled', options: ['enabled', 'disabled'] },
 ] as const
 
 export default function SettingsView() {

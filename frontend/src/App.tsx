@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar'
 import CalendarView from './components/CalendarView'
 import SettingsView from './components/SettingsView'
 import TasksView from './components/TasksView'
+import ReminderToast from './components/ReminderToast'
 
 type View = 'today' | 'tasks' | 'week' | 'settings'
 
@@ -18,6 +19,7 @@ export default function App() {
         {view === 'settings' && <SettingsView />}
         {view === 'tasks' && <TasksView />}
       </main>
+      <ReminderToast />
     </div>
   )
 }
