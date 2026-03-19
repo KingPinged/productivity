@@ -47,3 +47,6 @@ productivity_timer_data/
 # Build artifacts
 *.spec
 *.xpi
+
+# Exception: include frontend dist build
+!frontend/dist/
