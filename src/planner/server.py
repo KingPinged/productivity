@@ -8,9 +8,11 @@ from fastapi.staticfiles import StaticFiles
 
 from src.planner.api.auth_middleware import create_token_dependency
 from src.planner.api.health import router as health_router
+from src.planner.api import auth as auth_module
 from src.planner.api import preferences as prefs_module
 from src.planner.api import schedule as schedule_module
 from src.planner.db import PlannerDB
+from src.planner.ingestion.google_auth import GoogleAuthManager
 
 STATIC_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
@@ -19,6 +21,7 @@ def create_app(
     db_path: str | None = None,
     auth_token: str | None = None,
     static_dir: Path | None = None,
+    google_client_config: dict | None = None,
 ) -> FastAPI:
     if auth_token is None:
         auth_token = secrets.token_urlsafe(32)
@@ -47,6 +50,23 @@ def create_app(
 
     app.dependency_overrides[prefs_module.get_db] = get_db
     app.dependency_overrides[schedule_module.get_db] = get_db
+
+    # Google OAuth setup
+    if google_client_config:
+        auth_module.auth_manager = GoogleAuthManager(
+            client_config=google_client_config,
+            redirect_uri=f"http://localhost:8321/auth/callback",
+        )
+
+    app.dependency_overrides[auth_module.get_db] = get_db
+
+    # Protected auth routes (bearer token required)
+    for route in auth_module.router.routes:
+        route.dependencies = [require_token]
+    app.include_router(auth_module.router)
+
+    # Callback route (unauthenticated — Google redirects browser here)
+    app.include_router(auth_module.callback_router)
 
     app.include_router(health_router)
 
