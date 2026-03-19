@@ -13,18 +13,18 @@ interface CalendarViewProps {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  gcal: '#22c55e',
-  gmail: '#3b82f6',
-  canvas: '#f59e0b',
-  manual: '#a855f7',
+  gcal: '#34D399',
+  gmail: '#818CF8',
+  canvas: '#FBBF24',
+  manual: '#F472B6',
 }
 
 const BLOCK_COLORS: Record<string, string> = {
-  study: '#3b82f6',
-  meeting: '#22c55e',
-  rest: '#f59e0b',
-  personal: '#a855f7',
-  buffer: '#6b7280',
+  study: '#818CF8',
+  meeting: '#34D399',
+  rest: '#FBBF24',
+  personal: '#F472B6',
+  buffer: '#A8A29E',
 }
 
 function toFullCalendarEvent(event: CalendarEvent) {
@@ -34,8 +34,8 @@ function toFullCalendarEvent(event: CalendarEvent) {
     start: event.start_time,
     end: event.end_time || undefined,
     allDay: event.all_day,
-    backgroundColor: SOURCE_COLORS[event.source] || '#6b7280',
-    borderColor: SOURCE_COLORS[event.source] || '#6b7280',
+    backgroundColor: SOURCE_COLORS[event.source] || '#A8A29E',
+    borderColor: SOURCE_COLORS[event.source] || '#A8A29E',
     extendedProps: { type: 'event', source: event.source },
   }
 }
@@ -47,9 +47,9 @@ function blockToFullCalendar(block: ScheduleBlock) {
     title: `${block.block_type.charAt(0).toUpperCase() + block.block_type.slice(1)}${block.ai_reason ? `: ${block.ai_reason}` : ''}`,
     start: `${date}T${block.start_time}:00`,
     end: `${date}T${block.end_time}:00`,
-    backgroundColor: block.status === 'completed' ? '#374151' : (BLOCK_COLORS[block.block_type] || '#6b7280'),
-    borderColor: block.status === 'completed' ? '#4b5563' : (BLOCK_COLORS[block.block_type] || '#6b7280'),
-    textColor: block.status === 'completed' ? '#9ca3af' : '#ffffff',
+    backgroundColor: block.status === 'completed' ? '#F5F0EB' : (BLOCK_COLORS[block.block_type] || '#A8A29E'),
+    borderColor: block.status === 'completed' ? '#E7E5E4' : (BLOCK_COLORS[block.block_type] || '#A8A29E'),
+    textColor: block.status === 'completed' ? '#A8A29E' : '#ffffff',
     extendedProps: { type: 'block', block },
   }
 }

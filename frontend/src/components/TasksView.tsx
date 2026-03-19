@@ -44,7 +44,7 @@ export default function TasksView() {
     return { now, later, future }
   }, [tasks])
 
-  if (loading) return <div className="text-gray-400">Loading tasks...</div>
+  if (loading) return <div className="text-muted">Loading tasks...</div>
 
   return (
     <div className="h-full flex flex-col">
@@ -55,7 +55,7 @@ export default function TasksView() {
           title="Now"
           subtitle="Due today/tomorrow"
           tasks={columns.now}
-          accentColor="text-red-400"
+          accentColor="text-urgent"
           onToggleStatus={handleToggleStatus}
           onDelete={deleteTask}
         />
@@ -63,7 +63,7 @@ export default function TasksView() {
           title="Later"
           subtitle="This week"
           tasks={columns.later}
-          accentColor="text-yellow-400"
+          accentColor="text-amber-500"
           onToggleStatus={handleToggleStatus}
           onDelete={deleteTask}
         />
@@ -71,7 +71,7 @@ export default function TasksView() {
           title="Future"
           subtitle="Beyond this week"
           tasks={columns.future}
-          accentColor="text-blue-400"
+          accentColor="text-accent"
           onToggleStatus={handleToggleStatus}
           onDelete={deleteTask}
         />
@@ -93,13 +93,13 @@ function TaskColumn({
   return (
     <div className="flex flex-col min-h-0">
       <div className="mb-3">
-        <h3 className={`text-sm font-bold uppercase ${accentColor}`}>{title}</h3>
-        <p className="text-xs text-gray-500">{subtitle}</p>
-        <span className="text-xs text-gray-600">{tasks.length} tasks</span>
+        <h3 className={`font-display font-semibold text-sm uppercase tracking-wider ${accentColor}`}>{title}</h3>
+        <p className="text-xs text-muted">{subtitle}</p>
+        <span className="text-xs text-muted">{tasks.length} tasks</span>
       </div>
       <div className="flex-1 overflow-y-auto space-y-2 pr-1">
         {tasks.length === 0 ? (
-          <p className="text-xs text-gray-600 text-center mt-4">No tasks</p>
+          <p className="text-xs text-muted text-center mt-4">No tasks</p>
         ) : (
           tasks.map(task => (
             <TaskCard

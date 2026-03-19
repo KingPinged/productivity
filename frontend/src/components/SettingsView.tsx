@@ -41,21 +41,21 @@ export default function SettingsView() {
     }
   }
 
-  if (loading) return <div className="text-gray-400">Loading...</div>
+  if (loading) return <div className="text-muted">Loading...</div>
 
   return (
     <div className="max-w-lg">
-      <h2 className="text-xl font-bold mb-6">Preferences</h2>
+      <h2 className="font-display font-bold text-xl text-primary mb-6">Preferences</h2>
 
       <div className="space-y-4">
         {FIELDS.map((field) => (
           <div key={field.key}>
-            <label className="block text-sm text-gray-400 mb-1">{field.label}</label>
+            <label className="block text-secondary text-sm font-medium mb-1">{field.label}</label>
             {field.type === 'select' ? (
               <select
                 value={form[field.key] || ''}
                 onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"
+                className="w-full bg-white border border-border rounded-lg px-3 py-2 text-primary focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
               >
                 {'options' in field && field.options.map((opt) => (
                   <option key={opt} value={opt}>{opt}</option>
@@ -66,7 +66,7 @@ export default function SettingsView() {
                 type={field.type}
                 value={form[field.key] || ''}
                 onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"
+                className="w-full bg-white border border-border rounded-lg px-3 py-2 text-primary focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
               />
             )}
           </div>
@@ -74,15 +74,15 @@ export default function SettingsView() {
       </div>
 
       <div className="mt-6">
-        <label className="block text-sm text-gray-400 mb-1">Anthropic API Key</label>
+        <label className="block text-secondary text-sm font-medium mb-1">Anthropic API Key</label>
         <input
           type="password"
           value={form['anthropic_api_key'] || ''}
           onChange={(e) => setForm({ ...form, anthropic_api_key: e.target.value })}
           placeholder="sk-ant-..."
-          className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm"
+          className="w-full bg-white border border-border rounded-lg px-3 py-2 text-primary font-mono text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
         />
-        <p className="text-xs text-gray-500 mt-1">
+        <p className="text-xs text-muted mt-1">
           Required for AI scheduling. Restart planner after changing.
         </p>
       </div>
@@ -90,20 +90,20 @@ export default function SettingsView() {
       <button
         onClick={handleSave}
         disabled={saving}
-        className="mt-6 px-6 py-2 bg-accent hover:bg-blue-700 rounded text-white font-medium disabled:opacity-50 transition-colors"
+        className="mt-6 px-6 py-2 bg-accent hover:bg-accent-hover rounded-xl text-white font-medium disabled:opacity-50 transition-colors"
       >
         {saving ? 'Saving...' : 'Save Preferences'}
       </button>
 
-      <div className="mt-10 border-t border-gray-700 pt-6">
+      <div className="mt-10 border-t border-border pt-6">
         <AccountsPanel />
-        <p className="text-xs text-gray-500 mt-2">
+        <p className="text-xs text-muted mt-2">
           To connect Google accounts, place your Google Cloud OAuth credentials file as
           "google_client_config.json" in the app data directory, then restart the planner.
         </p>
       </div>
 
-      <div className="mt-6 border-t border-gray-700 pt-6">
+      <div className="mt-6 border-t border-border pt-6">
         <CanvasPanel />
       </div>
     </div>

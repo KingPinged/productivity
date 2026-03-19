@@ -27,12 +27,12 @@ export default function QuickAddTask({ onAdd }: QuickAddTaskProps) {
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Add a task..."
-        className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-accent focus:outline-none"
+        className="flex-1 bg-white border border-border rounded-xl px-3 py-2 text-sm text-primary placeholder-muted focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
       />
       <button
         type="submit"
         disabled={adding || !title.trim()}
-        className="px-4 py-2 bg-accent hover:bg-blue-700 rounded text-sm text-white disabled:opacity-50 transition-colors"
+        className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm disabled:opacity-50 transition-colors"
       >
         {adding ? '+' : '+ Add'}
       </button>

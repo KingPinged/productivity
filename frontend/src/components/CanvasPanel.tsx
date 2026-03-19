@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { useCanvas } from '../hooks/useCanvas'
 
 const STATUS_COLORS: Record<string, string> = {
-  active: 'text-green-400',
-  expired: 'text-yellow-400',
-  error: 'text-red-400',
+  active: 'text-success',
+  expired: 'text-amber-500',
+  error: 'text-urgent',
 }
 
 export default function CanvasPanel() {
@@ -23,14 +23,14 @@ export default function CanvasPanel() {
     }
   }
 
-  if (loading) return <div className="text-gray-400">Loading Canvas configs...</div>
+  if (loading) return <div className="text-muted">Loading Canvas configs...</div>
 
   return (
     <div>
-      <h3 className="text-lg font-bold mb-4">Canvas LMS</h3>
+      <h3 className="font-display font-bold text-lg text-primary mb-4">Canvas LMS</h3>
 
       {configs.length === 0 ? (
-        <p className="text-sm text-gray-400 mb-4">
+        <p className="text-sm text-secondary mb-4">
           No Canvas instance connected. Enter your Canvas URL below to get started.
         </p>
       ) : (
@@ -38,12 +38,12 @@ export default function CanvasPanel() {
           {configs.map((config) => (
             <div
               key={config.id}
-              className="flex items-center justify-between p-3 bg-gray-800 rounded-lg"
+              className="flex items-center justify-between p-4 bg-sand rounded-xl"
             >
               <div>
-                <p className="text-white text-sm font-medium">{config.canvas_url}</p>
-                <p className="text-xs text-gray-400">
-                  Status: <span className={STATUS_COLORS[config.status] || 'text-gray-400'}>
+                <p className="text-primary text-sm font-medium">{config.canvas_url}</p>
+                <p className="text-xs text-secondary">
+                  Status: <span className={STATUS_COLORS[config.status] || 'text-muted'}>
                     {config.status}
                   </span>
                   {config.last_sync && ` · Last synced: ${new Date(config.last_sync).toLocaleString()}`}
@@ -53,14 +53,14 @@ export default function CanvasPanel() {
                 {config.status === 'expired' && (
                   <button
                     onClick={() => relogin(config.id)}
-                    className="text-blue-400 hover:text-blue-300 text-sm transition-colors"
+                    className="text-accent hover:text-accent-hover text-sm transition-colors"
                   >
                     Re-login
                   </button>
                 )}
                 <button
                   onClick={() => remove(config.id)}
-                  className="text-red-400 hover:text-red-300 text-sm transition-colors"
+                  className="text-urgent/60 hover:text-urgent text-sm transition-colors"
                 >
                   Remove
                 </button>
@@ -76,17 +76,17 @@ export default function CanvasPanel() {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://canvas.university.edu"
-          className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm"
+          className="flex-1 bg-white border border-border rounded-lg px-3 py-2 text-primary text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
         />
         <button
           onClick={handleSetup}
           disabled={setting_up || !url.trim()}
-          className="px-4 py-2 bg-accent hover:bg-blue-700 rounded text-sm text-white disabled:opacity-50 transition-colors"
+          className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm disabled:opacity-50 transition-colors"
         >
           {setting_up ? 'Logging in...' : 'Connect'}
         </button>
       </div>
-      <p className="text-xs text-gray-500 mt-2">
+      <p className="text-xs text-muted mt-2">
         A browser window will open for you to log in. Supports SSO and MFA.
       </p>
     </div>
