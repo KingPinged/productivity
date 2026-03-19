@@ -18,6 +18,19 @@ class ContextBuilder:
         all_blocks = self._db.get_schedule_blocks(date)
         completed = [b for b in all_blocks if b["status"] == "completed"]
 
+        # User context messages
+        user_context = self._db.get_active_context()
+
+        # Recent emails (from events with source='gmail')
+        recent_emails = [
+            {
+                "from": e.get("description", ""),
+                "subject": e["title"],
+                "snippet": e.get("description", "")[:200],
+            }
+            for e in self._db.get_events(source="gmail")[:20]
+        ]
+
         return {
             "date": date,
             "day_of_week": self._day_of_week(date),
@@ -55,6 +68,11 @@ class ContextBuilder:
                 for b in completed
             ],
             "preferences": prefs,
+            "user_context": [
+                {"message": c["message"], "created_at": c["created_at"]}
+                for c in user_context
+            ],
+            "recent_emails": recent_emails,
         }
 
     def compute_hash(self, context: dict) -> str:
