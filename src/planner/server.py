@@ -16,6 +16,7 @@ from src.planner.api import events as events_module
 from src.planner.api import sync as sync_module
 from src.planner.api import canvas as canvas_module
 from src.planner.api import tasks as tasks_module
+from src.planner.api import courses as courses_module
 from src.planner.api import reminders as reminders_module
 from src.planner.reminders.service import ReminderService
 from src.planner.reminders.notifier import Notifier
@@ -126,6 +127,12 @@ def create_app(
     anthropic_key = db.get_preference("anthropic_api_key")
     if anthropic_key:
         schedule_module.ai_scheduler = AIScheduler(db, api_key=anthropic_key)
+
+    # Course routes
+    app.dependency_overrides[courses_module.get_db] = get_db
+    for route in courses_module.router.routes:
+        route.dependencies = [require_token]
+    app.include_router(courses_module.router)
 
     # Task routes
     app.dependency_overrides[tasks_module.get_db] = get_db
