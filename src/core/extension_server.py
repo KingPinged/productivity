@@ -39,6 +39,9 @@ class ExtensionRequestHandler(BaseHTTPRequestHandler):
     nsfw_check_callback: Optional[Callable[[dict], dict]] = None
     nsfw_cache_callback: Optional[Callable[[], list]] = None
 
+    # Usage data summary callback
+    usage_data_callback: Optional[Callable[[], dict]] = None
+
     def log_message(self, format, *args):
         """Suppress default logging."""
         pass
@@ -69,6 +72,8 @@ class ExtensionRequestHandler(BaseHTTPRequestHandler):
             self._handle_punishment_status()
         elif self.path == '/nsfw-cache':
             self._handle_nsfw_cache()
+        elif self.path == '/usage':
+            self._handle_usage()
         else:
             self.send_response(404)
             self.end_headers()
@@ -238,6 +243,20 @@ class ExtensionRequestHandler(BaseHTTPRequestHandler):
             # Fail open - return safe on error
             self.wfile.write(b'{"is_nsfw": false, "confidence": 0, "cached": false, "method": "error"}')
 
+    def _handle_usage(self):
+        """Return usage data summary for the planner backend."""
+        callback = ExtensionRequestHandler.usage_data_callback
+        if callback:
+            data = callback()
+        else:
+            data = {"today": {"apps": {}, "websites": {}}}
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self._send_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
     def _handle_nsfw_cache(self):
         """Return all cached NSFW domain classifications for extension sync."""
         callback = ExtensionRequestHandler.nsfw_cache_callback
@@ -301,19 +320,16 @@ class ExtensionServer:
         if self._running:
             return True
 
-        # Try the default port first, then backups
-        ports_to_try = [self.port] + BACKUP_PORTS
+        # If port=0, let the OS assign a free port (useful for testing)
+        if self.port == 0:
+            server = HTTPServer(('127.0.0.1', 0), ExtensionRequestHandler)
+            self._server = server
+            self.port = server.server_address[1]
+        else:
+            # Try the default port first, then backups
+            ports_to_try = [self.port] + BACKUP_PORTS
 
-        for port in ports_to_try:
-            try:
-                server = HTTPServer(('127.0.0.1', port), ExtensionRequestHandler)
-                # Do NOT use SO_REUSEADDR on Windows - it allows port stealing by duplicate instances
-                self._server = server
-                self.port = port
-                break
-            except socket.error:
-                # Port in use - try to kill stale process, then retry once
-                self._kill_stale_server(port)
+            for port in ports_to_try:
                 try:
                     server = HTTPServer(('127.0.0.1', port), ExtensionRequestHandler)
                     # Do NOT use SO_REUSEADDR on Windows - it allows port stealing by duplicate instances
@@ -321,10 +337,19 @@ class ExtensionServer:
                     self.port = port
                     break
                 except socket.error:
-                    continue
-        else:
-            print("Could not start extension server - all ports in use")
-            return False
+                    # Port in use - try to kill stale process, then retry once
+                    self._kill_stale_server(port)
+                    try:
+                        server = HTTPServer(('127.0.0.1', port), ExtensionRequestHandler)
+                        # Do NOT use SO_REUSEADDR on Windows - it allows port stealing by duplicate instances
+                        self._server = server
+                        self.port = port
+                        break
+                    except socket.error:
+                        continue
+            else:
+                print("Could not start extension server - all ports in use")
+                return False
 
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -338,6 +363,7 @@ class ExtensionServer:
 
     def _run(self):
         """Server thread main loop."""
+        self._server.timeout = 0.5  # allow stop() to interrupt promptly
         while self._running:
             self._server.handle_request()
 
@@ -346,7 +372,6 @@ class ExtensionServer:
         self._running = False
         if self._server:
             try:
-                self._server.shutdown()
                 self._server.server_close()
             except Exception:
                 pass
@@ -395,6 +420,10 @@ class ExtensionServer:
     def set_nsfw_cache_callback(self, callback: Callable[[], list]):
         """Set callback to get all checked domains: callback() -> list of domain strings."""
         ExtensionRequestHandler.nsfw_cache_callback = callback
+
+    def set_usage_data_callback(self, callback: Callable[[], dict]):
+        """Set callback to get usage data summary: callback() -> dict."""
+        ExtensionRequestHandler.usage_data_callback = callback
 
     def get_port(self) -> int:
         """Get the port the server is running on."""
