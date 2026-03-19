@@ -11,8 +11,11 @@ from src.planner.api.health import router as health_router
 from src.planner.api import auth as auth_module
 from src.planner.api import preferences as prefs_module
 from src.planner.api import schedule as schedule_module
+from src.planner.api import events as events_module
+from src.planner.api import sync as sync_module
 from src.planner.db import PlannerDB
 from src.planner.ingestion.google_auth import GoogleAuthManager
+from src.planner.ingestion.sync_scheduler import SyncScheduler
 
 STATIC_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
@@ -78,6 +81,22 @@ def create_app(
         route.dependencies = [require_token]
     app.include_router(schedule_module.router)
 
+    # Events and sync routes
+    app.dependency_overrides[events_module.get_db] = get_db
+    for route in events_module.router.routes:
+        route.dependencies = [require_token]
+    app.include_router(events_module.router)
+
+    app.dependency_overrides[sync_module.get_db] = get_db
+    for route in sync_module.router.routes:
+        route.dependencies = [require_token]
+
+    # Sync scheduler
+    scheduler = SyncScheduler(db, auth_module.auth_manager)
+    scheduler.start()
+    sync_module.sync_callback = scheduler.sync_all
+    app.include_router(sync_module.router)
+
     serve_dir = static_dir or STATIC_DIR
     if serve_dir.exists():
         index_path = serve_dir / "index.html"
@@ -92,6 +111,7 @@ def create_app(
 
     @app.on_event("shutdown")
     def shutdown():
+        scheduler.stop()
         db.close()
 
     return app
