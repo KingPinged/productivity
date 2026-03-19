@@ -28,6 +28,7 @@ class TrayIcon:
         on_pause: Callable,
         on_stop: Callable,
         on_settings: Callable,
+        on_planner: Optional[Callable] = None,
     ):
         """
         Initialize the tray icon.
@@ -38,12 +39,14 @@ class TrayIcon:
             on_pause: Callback to pause timer
             on_stop: Callback to stop timer
             on_settings: Callback to show settings
+            on_planner: Callback to open planner window
         """
         self.on_show = on_show
         self.on_start = on_start
         self.on_pause = on_pause
         self.on_stop = on_stop
         self.on_settings = on_settings
+        self.on_planner = on_planner
 
         self._icon: Optional[Icon] = None
         self._current_state = TimerState.IDLE
@@ -95,6 +98,8 @@ class TrayIcon:
             MenuItem("Pause", self._on_pause_click),
             MenuItem("Stop Session", self._on_stop_click),
             Menu.SEPARATOR,
+            MenuItem("Open Planner", self._on_planner_click),
+            Menu.SEPARATOR,
             MenuItem("Settings", self._on_settings_click),
         )
 
@@ -124,6 +129,11 @@ class TrayIcon:
     def _on_settings_click(self, icon, item) -> None:
         """Handle Settings click."""
         self.on_settings()
+
+    def _on_planner_click(self, icon, item) -> None:
+        """Handle Open Planner click."""
+        if self.on_planner:
+            self.on_planner()
 
     def start(self) -> None:
         """Start the tray icon in a background thread."""

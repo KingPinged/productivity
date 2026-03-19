@@ -2,8 +2,14 @@
 Main application orchestration for Productivity Timer.
 """
 
+import platform
+import secrets
+import subprocess
+import sys
 import time
 import threading
+import urllib.request
+from pathlib import Path
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from tkinter import messagebox
@@ -14,7 +20,7 @@ from src.utils.admin import is_admin
 from src.data.config import Config
 from src.data.default_blocklists import get_adult_sites
 from src.data.nsfw_cache import NSFWCache
-from src.core.nsfw_detector import NSFWDetector, PageSignals
+from src.core.nsfw_detector import NSFWDetector, PageSignals, fetch_page_signals
 from src.core.dns_monitor import DNSMonitor
 from src.core.timer import PomodoroTimer
 from src.core.process_blocker import ProcessBlocker
@@ -108,6 +114,9 @@ class ProductivityApp:
         # Start watching the guard process
         self._start_guard_watcher()
 
+        # Launch planner backend and create planner window
+        self._init_planner()
+
     def _init_timer(self) -> None:
         """Initialize the Pomodoro timer and AFK detector."""
         # Initialize AFK detector for anti-idle protection
@@ -184,6 +193,7 @@ class ProductivityApp:
             on_pause=self._on_pause,
             on_stop=self._on_stop,
             on_settings=self._on_settings,
+            on_planner=self._open_planner,
         )
 
         if self.tray_icon.is_available():
@@ -212,6 +222,56 @@ class ProductivityApp:
         thread = threading.Thread(target=watch_loop, daemon=True)
         thread.start()
 
+    def _init_planner(self):
+        """Launch the FastAPI planner backend as a subprocess."""
+        from src.utils.constants import APP_DATA_DIR
+
+        self._planner_token = secrets.token_urlsafe(32)
+        self._planner_port = 8321
+        db_path = str(Path(APP_DATA_DIR) / "planner.db")
+
+        self._planner_process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m", "src.planner.server",
+                db_path,
+                self._planner_token,
+                str(self._planner_port),
+            ],
+            cwd=str(Path(__file__).parent.parent),
+        )
+
+        self._wait_for_planner_health()
+
+        try:
+            from src.ui.planner_window import PlannerWindow
+            self._planner_window = PlannerWindow(
+                server_url=f"http://127.0.0.1:{self._planner_port}",
+                auth_token=self._planner_token,
+            )
+        except ImportError:
+            self._planner_window = None
+
+    def _wait_for_planner_health(self, timeout: int = 10):
+        """Poll /health until the planner backend is ready."""
+        import time as _time
+        url = f"http://127.0.0.1:{self._planner_port}/health"
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            try:
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=2) as resp:
+                    if resp.status == 200:
+                        return
+            except Exception:
+                pass
+            _time.sleep(0.5)
+        print("Warning: Planner backend did not become ready in time")
+
+    def _open_planner(self):
+        if hasattr(self, '_planner_window') and self._planner_window:
+            self._planner_window.show()
+
     def _init_usage_tracking(self) -> None:
         """Initialize usage tracking for apps and websites."""
         import atexit
@@ -235,6 +295,13 @@ class ProductivityApp:
         # Register atexit handler to save on unexpected exit
         atexit.register(self._save_usage_data_sync)
 
+        # Wire up usage data callback for extension server /usage endpoint
+        self.extension_server.set_usage_data_callback(lambda: {
+            "today": self.usage_data.get_daily_stats().to_dict()
+        } if hasattr(self, 'usage_data') and self.usage_data else {
+            "today": {"date": "", "entries": {}, "total_app_seconds": 0, "total_website_seconds": 0}
+        })
+
     def _on_usage_tick(self, name: str, category: str, seconds: int) -> None:
         """Handle usage tick from app tracker."""
         self.usage_data.record_usage(name, category, seconds)
@@ -246,6 +313,7 @@ class ProductivityApp:
                 and self.free_time_bucket.has_time()
                 and name.lower() in (app.lower() for app in self.config.get_all_blocked_apps())):
             self.free_time_bucket.drain(seconds)
+            self.root.after(0, self._update_bucket_display)
 
     def _on_website_usage(self, category: str, name: str, seconds: int) -> None:
         """Handle website usage report from extension."""
@@ -258,6 +326,7 @@ class ProductivityApp:
                 and self.free_time_bucket.has_time()
                 and name.lower() in (site.lower() for site in self.config.get_all_blocked_websites())):
             self.free_time_bucket.drain(seconds)
+            self.root.after(0, self._update_bucket_display)
 
     def _schedule_usage_save(self) -> None:
         """Schedule periodic usage data saves."""
@@ -383,17 +452,23 @@ class ProductivityApp:
         return result
 
     def _on_dns_domain_seen(self, domain: str) -> None:
-        """Handle new domain from DNS monitor - check via AI with domain name only."""
+        """Handle new domain from DNS monitor - fetch page content then check via AI."""
         if not self.config.ai_nsfw_detection_enabled or not self.config.openai_api_key:
             return
 
-        signals = PageSignals(
-            url=f"https://{domain}",
-            domain=domain,
-            title='',
-            meta_description='',
-            body_text='',
-        )
+        # Fetch actual page content to avoid false positives from domain-name-only guessing
+        signals = fetch_page_signals(domain)
+        if signals is None:
+            # Couldn't fetch page — fall back to domain-only check
+            print(f"[DNS Monitor] Could not fetch {domain}, falling back to domain-only check")
+            signals = PageSignals(
+                url=f"https://{domain}",
+                domain=domain,
+                title='',
+                meta_description='',
+                body_text='',
+            )
+
         result = self.nsfw_detector.check_content_sync(signals)
         print(f"[DNS Monitor] AI result for {domain}: is_nsfw={result.get('is_nsfw')}, method={result.get('method')}")
 
@@ -512,6 +587,10 @@ class ProductivityApp:
             self._start_blocking()
         elif new_state == TimerState.BREAK:
             self._stop_blocking()
+        elif new_state == TimerState.PAUSED:
+            # If paused from break, activate blocking until resumed
+            if self.timer.paused_from_state == TimerState.BREAK:
+                self._start_blocking()
         elif new_state == TimerState.IDLE:
             # If bucket feature is enabled and bucket is empty, keep blocking
             if (self.config.free_time_bucket_enabled
@@ -587,10 +666,31 @@ class ProductivityApp:
         else:
             self.main_window.update_sets_progress(0, self.config.sets_per_session)
 
+    def _play_alert_sound(self) -> None:
+        """Play a distinctive multi-tone alert sound."""
+        def _play():
+            if platform.system() == 'Windows':
+                import winsound
+                # Rising three-tone chime: attention-grabbing but not jarring
+                winsound.Beep(800, 200)
+                winsound.Beep(1000, 200)
+                winsound.Beep(1200, 350)
+            elif platform.system() == 'Darwin':
+                import subprocess
+                # macOS: use system alert sound at full volume
+                subprocess.run(
+                    ['afplay', '/System/Library/Sounds/Glass.aiff',
+                     '-v', '5'],
+                    capture_output=True,
+                )
+            else:
+                self.root.bell()
+        threading.Thread(target=_play, daemon=True).start()
+
     def _show_sets_complete_notification(self) -> None:
         """Show notification when all sets are completed."""
         self.main_window.show()
-        self.root.bell()
+        self._play_alert_sound()
         messagebox.showinfo(
             "Session Complete!",
             f"Congratulations! You completed all {self.config.sets_per_session} sets!\n\n"
@@ -605,8 +705,8 @@ class ProductivityApp:
         # Bring window to front
         self.main_window.show()
 
-        # Play system sound (beep)
-        self.root.bell()
+        # Play alert sound
+        self._play_alert_sound()
 
     def _start_blocking(self) -> None:
         """Start blocking apps and websites."""
@@ -901,6 +1001,12 @@ class ProductivityApp:
 
         # Cleanup punishment system (but DON'T restore network if locked - punishment continues!)
         self.internet_disabler.cleanup()
+
+        # Cleanup planner backend and window
+        if hasattr(self, '_planner_process') and self._planner_process:
+            self._planner_process.terminate()
+        if hasattr(self, '_planner_window') and self._planner_window:
+            self._planner_window.destroy()
 
         # Destroy window
         self.root.quit()
