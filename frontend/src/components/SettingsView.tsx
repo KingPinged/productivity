@@ -75,6 +75,10 @@ export default function SettingsView() {
 
       <div className="mt-10 border-t border-gray-700 pt-6">
         <AccountsPanel />
+        <p className="text-xs text-gray-500 mt-2">
+          To connect Google accounts, place your Google Cloud OAuth credentials file as
+          "google_client_config.json" in the app data directory, then restart the planner.
+        </p>
       </div>
     </div>
   )

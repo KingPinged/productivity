@@ -1,3 +1,4 @@
+import json as json_module
 import secrets
 from pathlib import Path
 
@@ -53,6 +54,12 @@ def create_app(
 
     app.dependency_overrides[prefs_module.get_db] = get_db
     app.dependency_overrides[schedule_module.get_db] = get_db
+
+    # Load Google OAuth config from app data directory if not provided
+    google_config_path = Path(db_path).parent / "google_client_config.json"
+    if google_client_config is None and google_config_path.exists():
+        with open(google_config_path) as f:
+            google_client_config = json_module.load(f)
 
     # Google OAuth setup
     if google_client_config:
