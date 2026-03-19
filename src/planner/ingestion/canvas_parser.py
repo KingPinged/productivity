@@ -7,6 +7,50 @@ class CanvasParser:
     def __init__(self, base_url: str):
         self._base_url = base_url.rstrip("/")
 
+    def _parse_canvas_date(self, date_str: str) -> str | None:
+        """Convert Canvas date format to ISO 8601.
+        Examples: 'Mar 22 at 11:59pm' -> '2026-03-22T23:59:00'
+                  'Apr 3 at 5pm' -> '2026-04-03T17:00:00'
+        """
+        if not date_str:
+            return None
+        from datetime import datetime
+
+        # Clean up the string
+        date_str = date_str.strip()
+
+        # Pattern: "Mon DD at H:MMam/pm" or "Mon DD at Ham/pm"
+        match = re.match(
+            r'(\w{3})\s+(\d{1,2})(?:,?\s*(\d{4}))?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)',
+            date_str, re.IGNORECASE,
+        )
+        if not match:
+            return date_str  # Return as-is if can't parse
+
+        month_str, day, year, hour, minute, ampm = match.groups()
+
+        # Default to current year if not specified
+        if year is None:
+            year = str(datetime.now().year)
+
+        minute = minute or "00"
+        hour = int(hour)
+        if ampm.lower() == 'pm' and hour != 12:
+            hour += 12
+        elif ampm.lower() == 'am' and hour == 12:
+            hour = 0
+
+        # Parse month
+        months = {'jan':1,'feb':2,'mar':3,'apr':4,'may':5,'jun':6,
+                  'jul':7,'aug':8,'sep':9,'oct':10,'nov':11,'dec':12}
+        month = months.get(month_str.lower()[:3], 1)
+
+        try:
+            dt = datetime(int(year), month, int(day), hour, int(minute))
+            return dt.strftime('%Y-%m-%dT%H:%M:00')
+        except ValueError:
+            return date_str
+
     def parse_assignments_page(self, html: str, course_id: str, course_name: str) -> list[dict]:
         """Parse a course assignments page. Handles both relative and absolute URLs."""
         if not html:
@@ -41,7 +85,7 @@ class CanvasParser:
                 "external_id": f"canvas:{course_id}:{assignment_id}",
                 "title": title.strip(),
                 "course": course_name,
-                "due_date": dates[idx].strip() if idx < len(dates) else None,
+                "due_date": self._parse_canvas_date(dates[idx]) if idx < len(dates) else None,
             })
 
         return assignments
