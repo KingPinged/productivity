@@ -90,6 +90,20 @@ CREATE TABLE IF NOT EXISTS reminders (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS courses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    canvas_course_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    code TEXT,
+    syllabus_url TEXT,
+    syllabus_text TEXT,
+    instructor TEXT,
+    schedule_info TEXT,
+    canvas_config_id INTEGER REFERENCES canvas_configs(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS preferences (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -345,6 +359,61 @@ class PlannerDB:
             "UPDATE canvas_configs SET last_sync = ? WHERE id = ?", (timestamp, config_id)
         )
         conn.commit()
+
+    # --- Course CRUD ---
+
+    def upsert_course(
+        self,
+        canvas_course_id: str,
+        name: str,
+        code: str | None = None,
+        syllabus_url: str | None = None,
+        syllabus_text: str | None = None,
+        instructor: str | None = None,
+        schedule_info: str | None = None,
+        canvas_config_id: int | None = None,
+    ) -> int:
+        conn = self._get_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = conn.execute(
+            "SELECT id FROM courses WHERE canvas_course_id = ?", (canvas_course_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                """UPDATE courses SET name=?, code=?, syllabus_url=?, syllabus_text=?,
+                   instructor=?, schedule_info=?, canvas_config_id=?, updated_at=?
+                   WHERE id=?""",
+                (name, code, syllabus_url, syllabus_text, instructor,
+                 schedule_info, canvas_config_id, now, row[0]),
+            )
+            conn.commit()
+            return row[0]
+        cursor = conn.execute(
+            """INSERT INTO courses (canvas_course_id, name, code, syllabus_url,
+               syllabus_text, instructor, schedule_info, canvas_config_id, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (canvas_course_id, name, code, syllabus_url, syllabus_text,
+             instructor, schedule_info, canvas_config_id, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_courses(self) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM courses ORDER BY name")
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def get_course(self, course_id: int) -> dict | None:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM courses WHERE id = ?", (course_id,))
+        row = cursor.fetchone()
+        conn.row_factory = None
+        return dict(row) if row else None
 
     # --- Task CRUD ---
 
