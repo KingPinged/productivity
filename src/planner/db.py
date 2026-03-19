@@ -279,3 +279,140 @@ class PlannerDB:
         conn = self._get_conn()
         conn.execute("DELETE FROM events WHERE account_id = ?", (account_id,))
         conn.commit()
+
+    # --- Canvas Config CRUD ---
+
+    def add_canvas_config(self, canvas_url: str, session_cookies: str) -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "INSERT INTO canvas_configs (canvas_url, session_cookies) VALUES (?, ?)",
+            (canvas_url, session_cookies),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_canvas_config(self, config_id: int) -> dict | None:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM canvas_configs WHERE id = ?", (config_id,))
+        row = cursor.fetchone()
+        conn.row_factory = None
+        return dict(row) if row else None
+
+    def list_canvas_configs(self) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM canvas_configs WHERE deleted_at IS NULL ORDER BY canvas_url"
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def soft_delete_canvas_config(self, config_id: int) -> None:
+        conn = self._get_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE canvas_configs SET deleted_at = ? WHERE id = ?", (now, config_id)
+        )
+        conn.commit()
+
+    def update_canvas_cookies(self, config_id: int, session_cookies: str) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE canvas_configs SET session_cookies = ?, status = 'active' WHERE id = ?",
+            (session_cookies, config_id),
+        )
+        conn.commit()
+
+    def update_canvas_status(self, config_id: int, status: str) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE canvas_configs SET status = ? WHERE id = ?", (status, config_id)
+        )
+        conn.commit()
+
+    def update_canvas_last_sync(self, config_id: int, timestamp: str) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE canvas_configs SET last_sync = ? WHERE id = ?", (timestamp, config_id)
+        )
+        conn.commit()
+
+    # --- Task CRUD ---
+
+    def upsert_task(
+        self,
+        source: str,
+        external_id: str,
+        title: str,
+        description: str | None = None,
+        course: str | None = None,
+        deadline: str | None = None,
+        estimated_minutes: int | None = None,
+        priority: int = 3,
+        status: str = "pending",
+        grade_weight: float | None = None,
+        current_grade: str | None = None,
+        ai_notes: str | None = None,
+    ) -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT id FROM tasks WHERE source = ? AND external_id = ?",
+            (source, external_id),
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                """UPDATE tasks SET title=?, description=?, course=?, deadline=?,
+                   estimated_minutes=?, priority=?, status=?, grade_weight=?,
+                   current_grade=?, ai_notes=?
+                   WHERE id=?""",
+                (title, description, course, deadline, estimated_minutes,
+                 priority, status, grade_weight, current_grade, ai_notes, row[0]),
+            )
+            conn.commit()
+            return row[0]
+        cursor = conn.execute(
+            """INSERT INTO tasks (source, external_id, title, description, course,
+               deadline, estimated_minutes, priority, status, grade_weight,
+               current_grade, ai_notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (source, external_id, title, description, course, deadline,
+             estimated_minutes, priority, status, grade_weight, current_grade, ai_notes),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_tasks(
+        self,
+        source: str | None = None,
+        status: str | None = None,
+    ) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        query = "SELECT * FROM tasks WHERE 1=1"
+        params: list = []
+        if source:
+            query += " AND source = ?"
+            params.append(source)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY deadline"
+        cursor = conn.execute(query, params)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def update_task_status(self, task_id: int, status: str) -> None:
+        conn = self._get_conn()
+        updates = "status = ?"
+        params: list = [status]
+        if status == "done":
+            now = datetime.now(timezone.utc).isoformat()
+            updates += ", completed_at = ?"
+            params.append(now)
+        params.append(task_id)
+        conn.execute(f"UPDATE tasks SET {updates} WHERE id = ?", params)
+        conn.commit()
