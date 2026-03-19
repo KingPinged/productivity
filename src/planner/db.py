@@ -103,6 +103,13 @@ CREATE TABLE IF NOT EXISTS ai_context_cache (
     tokens_used INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS user_context (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    active INTEGER DEFAULT 1
+);
 """
 
 
@@ -519,3 +526,28 @@ class PlannerDB:
         row = cursor.fetchone()
         conn.row_factory = None
         return dict(row) if row else None
+
+    # --- User Context ---
+
+    def add_user_context(self, message: str) -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "INSERT INTO user_context (message) VALUES (?)", (message,)
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_active_context(self) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM user_context WHERE active = 1 ORDER BY created_at DESC LIMIT 20"
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def clear_context(self) -> None:
+        conn = self._get_conn()
+        conn.execute("UPDATE user_context SET active = 0")
+        conn.commit()
