@@ -29,4 +29,32 @@ def trigger_replan(body: dict | None = None, db: PlannerDB = Depends(get_db)):
     if result is None:
         return {"status": "failed", "message": "AI scheduling failed. Check API key and try again."}
     ai_scheduler.store_schedule(target_date, result)
-    return {"status": "ok", "blocks_count": len(result.get("schedule", []))}
+    return {
+        "status": "ok",
+        "blocks_count": len(result.get("schedule", [])),
+        "summary": result.get("summary", ""),
+        "email_alerts": result.get("email_alerts", []),
+        "tasks_today": result.get("tasks_today", []),
+        "tasks_later": result.get("tasks_later", []),
+    }
+
+
+@router.post("/context")
+def add_context(body: dict, db: PlannerDB = Depends(get_db)):
+    """Add user context message for AI scheduling."""
+    message = body.get("message", "").strip()
+    if not message:
+        return {"error": "Message is required"}
+    ctx_id = db.add_user_context(message)
+    return {"status": "ok", "id": ctx_id}
+
+@router.get("/context")
+def get_context(db: PlannerDB = Depends(get_db)):
+    """Get active user context messages."""
+    return db.get_active_context()
+
+@router.delete("/context")
+def clear_context(db: PlannerDB = Depends(get_db)):
+    """Clear all user context messages."""
+    db.clear_context()
+    return {"status": "cleared"}
