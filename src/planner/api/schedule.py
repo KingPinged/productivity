@@ -58,3 +58,22 @@ def clear_context(db: PlannerDB = Depends(get_db)):
     """Clear all user context messages."""
     db.clear_context()
     return {"status": "cleared"}
+
+@router.get("/summary/{date}")
+def get_summary(date: str, db: PlannerDB = Depends(get_db)):
+    """Get the AI-generated daily summary."""
+    cache = db.get_ai_cache(date)
+    if not cache:
+        return {"date": date, "summary": None, "email_alerts": []}
+    try:
+        import json
+        data = json.loads(cache["schedule_json"])
+        return {
+            "date": date,
+            "summary": data.get("summary", ""),
+            "email_alerts": data.get("email_alerts", []),
+            "tasks_today": data.get("tasks_today", []),
+            "tasks_later": data.get("tasks_later", []),
+        }
+    except Exception:
+        return {"date": date, "summary": None, "email_alerts": []}
