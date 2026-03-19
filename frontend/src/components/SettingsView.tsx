@@ -25,6 +25,10 @@ export default function SettingsView() {
     for (const field of FIELDS) {
       initial[field.key] = prefs[field.key] || field.default
     }
+    // Include API key if already set
+    if (prefs['anthropic_api_key']) {
+      initial['anthropic_api_key'] = prefs['anthropic_api_key']
+    }
     setForm(initial)
   }, [prefs])
 
@@ -67,6 +71,20 @@ export default function SettingsView() {
             )}
           </div>
         ))}
+      </div>
+
+      <div className="mt-6">
+        <label className="block text-sm text-gray-400 mb-1">Anthropic API Key</label>
+        <input
+          type="password"
+          value={form['anthropic_api_key'] || ''}
+          onChange={(e) => setForm({ ...form, anthropic_api_key: e.target.value })}
+          placeholder="sk-ant-..."
+          className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Required for AI scheduling. Restart planner after changing.
+        </p>
       </div>
 
       <button
