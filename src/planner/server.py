@@ -15,6 +15,7 @@ from src.planner.api import schedule as schedule_module
 from src.planner.api import events as events_module
 from src.planner.api import sync as sync_module
 from src.planner.api import canvas as canvas_module
+from src.planner.ai.scheduler import AIScheduler
 from src.planner.db import PlannerDB
 from src.planner.ingestion.google_auth import GoogleAuthManager
 from src.planner.ingestion.sync_scheduler import SyncScheduler
@@ -116,6 +117,11 @@ def create_app(
     for route in canvas_module.router.routes:
         route.dependencies = [require_token]
     app.include_router(canvas_module.router)
+
+    # AI Scheduler setup
+    anthropic_key = db.get_preference("anthropic_api_key")
+    if anthropic_key:
+        schedule_module.ai_scheduler = AIScheduler(db, api_key=anthropic_key)
 
     serve_dir = static_dir or STATIC_DIR
     if serve_dir.exists():

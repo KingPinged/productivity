@@ -1,14 +1,32 @@
 from fastapi import APIRouter, Depends
-
 from src.planner.db import PlannerDB
 
 router = APIRouter(prefix="/api")
 
+ai_scheduler = None
 
 def get_db():
     raise NotImplementedError("Override via app.dependency_overrides")
 
-
 @router.get("/schedule/{date}")
 def get_schedule(date: str, db: PlannerDB = Depends(get_db)):
-    return {"date": date, "blocks": []}
+    blocks = db.get_schedule_blocks(date)
+    return {"date": date, "blocks": blocks}
+
+@router.patch("/schedule/{block_id}")
+def update_block(block_id: int, body: dict, db: PlannerDB = Depends(get_db)):
+    if "status" in body:
+        db.update_block_status(block_id, body["status"])
+    return {"status": "updated"}
+
+@router.post("/schedule/replan")
+def trigger_replan(body: dict | None = None, db: PlannerDB = Depends(get_db)):
+    from datetime import date as date_type
+    target_date = (body or {}).get("date", date_type.today().isoformat())
+    if ai_scheduler is None:
+        return {"error": "AI scheduler not configured. Set anthropic_api_key in preferences."}
+    result = ai_scheduler.replan(target_date)
+    if result is None:
+        return {"status": "failed", "message": "AI scheduling failed. Check API key and try again."}
+    ai_scheduler.store_schedule(target_date, result)
+    return {"status": "ok", "blocks_count": len(result.get("schedule", []))}
