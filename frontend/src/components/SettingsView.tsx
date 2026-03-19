@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { usePreferences } from '../hooks/usePreferences'
+import AccountsPanel from './AccountsPanel'
 
 const FIELDS = [
   { key: 'wake_time', label: 'Wake Time', type: 'time', default: '07:00' },
@@ -73,10 +74,7 @@ export default function SettingsView() {
       </button>
 
       <div className="mt-10 border-t border-gray-700 pt-6">
-        <h3 className="text-lg font-bold mb-4">Connected Accounts</h3>
-        <p className="text-sm text-gray-400">
-          Account management coming in Phase 2 (Google) and Phase 3 (Canvas).
-        </p>
+        <AccountsPanel />
       </div>
     </div>
   )

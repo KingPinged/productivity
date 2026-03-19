@@ -17,3 +17,31 @@ export interface DaySchedule {
 export interface Preferences {
   [key: string]: string
 }
+
+export interface Account {
+  id: number
+  email: string
+  provider: string
+  last_sync: string | null
+  created_at: string
+}
+
+export interface CalendarEvent {
+  id: number
+  source: string
+  title: string
+  description: string | null
+  start_time: string
+  end_time: string | null
+  all_day: boolean
+  location: string | null
+  event_type: string | null
+}
+
+export interface SyncStatus {
+  accounts: {
+    email: string
+    last_sync: string | null
+    provider: string
+  }[]
+}
