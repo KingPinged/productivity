@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useSchedule } from '../hooks/useSchedule'
 import { useTasks } from '../hooks/useTasks'
-import type { ScheduleBlock } from '../types'
+import type { ScheduleBlock, Task } from '../types'
 
 type View = 'today' | 'tasks' | 'week' | 'courses' | 'settings'
 
@@ -19,9 +19,7 @@ const navItems: { view: View; label: string; icon: string }[] = [
 ]
 
 function getNextBlock(blocks: ScheduleBlock[]): ScheduleBlock | null {
-  const now = new Date()
-  const currentTime = now.toTimeString().slice(0, 5) // HH:MM
-
+  const currentTime = new Date().toTimeString().slice(0, 5)
   for (const block of blocks) {
     if (block.status === 'scheduled' && block.start_time >= currentTime) {
       return block
@@ -42,68 +40,70 @@ export default function Sidebar({ currentView, onNavigate }: SidebarProps) {
 
   const upcomingTasks = useMemo(() => {
     return tasks
-      .filter(t => t.deadline)
-      .sort((a, b) => (a.deadline || '').localeCompare(b.deadline || ''))
+      .filter((t: Task) => t.deadline)
+      .sort((a: Task, b: Task) => (a.deadline || '').localeCompare(b.deadline || ''))
       .slice(0, 3)
   }, [tasks])
 
   return (
-    <aside className="w-56 bg-surface-light flex flex-col border-r border-gray-700">
-      <div className="p-4 border-b border-gray-700">
-        <h1 className="text-lg font-bold text-white">Planner</h1>
+    <aside className="w-60 bg-sand flex flex-col border-r border-border h-full">
+      <div className="px-5 pt-6 pb-4">
+        <h1 className="font-display font-extrabold text-lg text-primary tracking-tight">
+          Planner
+        </h1>
       </div>
 
-      <nav className="flex-1 p-2 space-y-1">
+      <nav className="flex-1 px-3 space-y-0.5">
         {navItems.map(({ view, label, icon }) => (
           <button
             key={view}
             onClick={() => onNavigate(view)}
-            className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2 transition-colors ${
+            className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2.5 transition-all duration-150 text-sm font-medium ${
               currentView === view
-                ? 'bg-accent text-white'
-                : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                ? 'bg-accent text-white shadow-soft'
+                : 'text-secondary hover:bg-white hover:text-primary hover:shadow-soft'
             }`}
           >
-            <span>{icon}</span>
+            <span className="text-base">{icon}</span>
             <span>{label}</span>
           </button>
         ))}
       </nav>
 
-      <div className="p-4 border-t border-gray-700">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
-          What&apos;s Next
+      <div className="px-4 py-5 border-t border-border">
+        <h3 className="font-display font-semibold text-[0.65rem] text-muted uppercase tracking-widest mb-3">
+          Up Next
         </h3>
         {nextBlock ? (
-          <div className="text-sm">
-            <p className="text-white font-medium">{nextBlock.block_type}</p>
-            <p className="text-gray-400 text-xs">{nextBlock.start_time} &mdash; {nextBlock.end_time}</p>
+          <div className="bg-white rounded-xl p-3 shadow-soft border border-border">
+            <p className="text-primary text-sm font-semibold">{nextBlock.block_type}</p>
+            <p className="text-secondary text-xs mt-0.5">{nextBlock.start_time} - {nextBlock.end_time}</p>
             {nextBlock.ai_reason && (
-              <p className="text-gray-500 text-xs mt-1 italic">{nextBlock.ai_reason}</p>
+              <p className="text-muted text-xs mt-1.5 leading-relaxed">{nextBlock.ai_reason}</p>
             )}
           </div>
         ) : (
-          <p className="text-sm text-gray-400">No upcoming blocks</p>
+          <p className="text-muted text-xs">Nothing scheduled</p>
         )}
 
         {upcomingTasks.length > 0 && (
-          <>
-            <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2 mt-4">
+          <div className="mt-4">
+            <h3 className="font-display font-semibold text-[0.65rem] text-muted uppercase tracking-widest mb-2">
               Upcoming
             </h3>
-            <div className="space-y-1">
-              {upcomingTasks.map(task => (
+            <div className="space-y-1.5">
+              {upcomingTasks.map((task: Task) => (
                 <div key={task.id} className="text-xs">
-                  <p className="text-gray-300 truncate">{task.title}</p>
+                  <p className="text-primary font-medium truncate">{task.title}</p>
                   {task.deadline && (
-                    <p className="text-gray-500">
-                      {new Date(task.deadline).toLocaleDateString()}
+                    <p className="text-muted">
+                      {new Date(task.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </p>
                   )}
                 </div>
               ))}
             </div>
-          </>
+          </div>
         )}
       </div>
     </aside>

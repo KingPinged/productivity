@@ -26,31 +26,60 @@ export default function App() {
     await reloadSummary()
   }, [triggerReplan, reloadSummary])
 
-  const activeAlerts = email_alerts.filter((_, i) => !dismissedAlerts.has(i))
+  const activeAlerts = email_alerts.filter((_: any, i: number) => !dismissedAlerts.has(i))
 
   return (
-    <div className="flex h-screen bg-surface">
+    <div className="flex h-screen bg-cream font-body">
       <Sidebar currentView={view} onNavigate={setView} />
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 overflow-auto">
         {view === 'today' && (
           <div className="h-full flex flex-col">
-            <ContextInput onSubmit={addMessage} onReplan={handleReplan} />
-            <DaySummary
-              summary={summary}
-              emailAlerts={activeAlerts}
-              tasksToday={tasks_today}
-              tasksLater={tasks_later}
-              onDismissAlert={(i) => setDismissedAlerts(prev => new Set(prev).add(i))}
-            />
-            <div className="flex-1 min-h-0">
-              <CalendarView mode="day" />
+            <div className="px-8 pt-6 pb-2">
+              <h1 className="font-display font-bold text-2xl text-primary mb-1">
+                {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+              </h1>
+              <p className="text-secondary text-sm mb-5">Plan your day, stay on track</p>
+              <ContextInput onSubmit={addMessage} onReplan={handleReplan} />
+              <DaySummary
+                summary={summary}
+                emailAlerts={activeAlerts}
+                tasksToday={tasks_today}
+                tasksLater={tasks_later}
+                onDismissAlert={(i: number) => setDismissedAlerts(prev => new Set(prev).add(i))}
+              />
+            </div>
+            <div className="flex-1 min-h-0 px-8 pb-6">
+              <div className="h-full bg-white rounded-2xl shadow-soft border border-border overflow-hidden">
+                <CalendarView mode="day" />
+              </div>
             </div>
           </div>
         )}
-        {view === 'week' && <CalendarView mode="week" />}
-        {view === 'settings' && <SettingsView />}
-        {view === 'tasks' && <TasksView />}
-        {view === 'courses' && <CoursesView />}
+        {view === 'week' && (
+          <div className="h-full p-8">
+            <h1 className="font-display font-bold text-2xl text-primary mb-6">Week Overview</h1>
+            <div className="h-[calc(100%-3.5rem)] bg-white rounded-2xl shadow-soft border border-border overflow-hidden">
+              <CalendarView mode="week" />
+            </div>
+          </div>
+        )}
+        {view === 'settings' && (
+          <div className="p-8">
+            <h1 className="font-display font-bold text-2xl text-primary mb-6">Settings</h1>
+            <SettingsView />
+          </div>
+        )}
+        {view === 'tasks' && (
+          <div className="h-full p-8">
+            <h1 className="font-display font-bold text-2xl text-primary mb-6">Tasks</h1>
+            <TasksView />
+          </div>
+        )}
+        {view === 'courses' && (
+          <div className="h-full p-8">
+            <CoursesView />
+          </div>
+        )}
       </main>
       <ReminderToast />
     </div>

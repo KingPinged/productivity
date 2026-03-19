@@ -2,7 +2,106 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  height: 100%;
-  width: 100%;
+@layer base {
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    font-family: 'DM Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
+
+  /* Smooth scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #D6D3D1;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #A8A29E;
+  }
+
+  /* FullCalendar overrides for light theme */
+  .fc {
+    --fc-border-color: #E7E5E4;
+    --fc-today-bg-color: #FEFCE8;
+    --fc-now-indicator-color: #EF4444;
+    --fc-button-bg-color: #FFFFFF;
+    --fc-button-border-color: #E7E5E4;
+    --fc-button-text-color: #1C1917;
+    --fc-button-hover-bg-color: #F5F3EF;
+    --fc-button-hover-border-color: #D6D3D1;
+    --fc-button-active-bg-color: #6366F1;
+    --fc-button-active-border-color: #6366F1;
+    --fc-page-bg-color: #FFFFFF;
+    --fc-neutral-bg-color: #FAF9F6;
+    --fc-list-event-hover-bg-color: #F5F3EF;
+    --fc-event-border-color: transparent;
+    font-family: 'DM Sans', system-ui, sans-serif !important;
+  }
+
+  .fc .fc-toolbar-title {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 1.25rem !important;
+    color: #1C1917 !important;
+  }
+
+  .fc .fc-button {
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    font-size: 0.8125rem !important;
+    padding: 6px 14px !important;
+    box-shadow: 0 1px 2px rgba(28,25,23,0.05) !important;
+    transition: all 0.15s ease !important;
+  }
+
+  .fc .fc-button-primary:not(:disabled).fc-button-active {
+    background-color: #6366F1 !important;
+    border-color: #6366F1 !important;
+    color: white !important;
+  }
+
+  .fc .fc-col-header-cell-cushion {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    color: #78716C !important;
+    padding: 10px 4px !important;
+  }
+
+  .fc .fc-timegrid-slot-label-cushion {
+    font-size: 0.6875rem !important;
+    color: #A8A29E !important;
+    font-weight: 500 !important;
+  }
+
+  .fc .fc-event {
+    border-radius: 6px !important;
+    border: none !important;
+    padding: 2px 6px !important;
+    font-size: 0.75rem !important;
+    font-weight: 500 !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08) !important;
+  }
+
+  .fc .fc-timegrid-now-indicator-line {
+    border-color: #EF4444 !important;
+    border-width: 2px !important;
+  }
+
+  .fc .fc-timegrid-now-indicator-arrow {
+    border-color: #EF4444 !important;
+  }
 }
