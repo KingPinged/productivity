@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { usePreferences } from '../hooks/usePreferences'
 import AccountsPanel from './AccountsPanel'
+import CanvasPanel from './CanvasPanel'
 
 const FIELDS = [
   { key: 'wake_time', label: 'Wake Time', type: 'time', default: '07:00' },
@@ -79,6 +80,10 @@ export default function SettingsView() {
           To connect Google accounts, place your Google Cloud OAuth credentials file as
           "google_client_config.json" in the app data directory, then restart the planner.
         </p>
+      </div>
+
+      <div className="mt-6 border-t border-gray-700 pt-6">
+        <CanvasPanel />
       </div>
     </div>
   )

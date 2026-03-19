@@ -45,3 +45,24 @@ export interface SyncStatus {
     provider: string
   }[]
 }
+
+export interface CanvasConfig {
+  id: number
+  canvas_url: string
+  status: 'active' | 'expired' | 'error'
+  last_sync: string | null
+}
+
+export interface Task {
+  id: number
+  source: string
+  title: string
+  description: string | null
+  course: string | null
+  deadline: string | null
+  estimated_minutes: number | null
+  priority: number
+  status: 'pending' | 'in_progress' | 'done' | 'skipped'
+  grade_weight: number | null
+  current_grade: string | null
+}

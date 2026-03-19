@@ -1,0 +1,94 @@
+import { useState } from 'react'
+import { useCanvas } from '../hooks/useCanvas'
+
+const STATUS_COLORS: Record<string, string> = {
+  active: 'text-green-400',
+  expired: 'text-yellow-400',
+  error: 'text-red-400',
+}
+
+export default function CanvasPanel() {
+  const { configs, loading, setup, relogin, remove } = useCanvas()
+  const [url, setUrl] = useState('')
+  const [setting_up, setSettingUp] = useState(false)
+
+  const handleSetup = async () => {
+    if (!url.trim()) return
+    setSettingUp(true)
+    try {
+      await setup(url.trim())
+      setUrl('')
+    } finally {
+      setSettingUp(false)
+    }
+  }
+
+  if (loading) return <div className="text-gray-400">Loading Canvas configs...</div>
+
+  return (
+    <div>
+      <h3 className="text-lg font-bold mb-4">Canvas LMS</h3>
+
+      {configs.length === 0 ? (
+        <p className="text-sm text-gray-400 mb-4">
+          No Canvas instance connected. Enter your Canvas URL below to get started.
+        </p>
+      ) : (
+        <div className="space-y-2 mb-4">
+          {configs.map((config) => (
+            <div
+              key={config.id}
+              className="flex items-center justify-between p-3 bg-gray-800 rounded-lg"
+            >
+              <div>
+                <p className="text-white text-sm font-medium">{config.canvas_url}</p>
+                <p className="text-xs text-gray-400">
+                  Status: <span className={STATUS_COLORS[config.status] || 'text-gray-400'}>
+                    {config.status}
+                  </span>
+                  {config.last_sync && ` · Last synced: ${new Date(config.last_sync).toLocaleString()}`}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {config.status === 'expired' && (
+                  <button
+                    onClick={() => relogin(config.id)}
+                    className="text-blue-400 hover:text-blue-300 text-sm transition-colors"
+                  >
+                    Re-login
+                  </button>
+                )}
+                <button
+                  onClick={() => remove(config.id)}
+                  className="text-red-400 hover:text-red-300 text-sm transition-colors"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://canvas.university.edu"
+          className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm"
+        />
+        <button
+          onClick={handleSetup}
+          disabled={setting_up || !url.trim()}
+          className="px-4 py-2 bg-accent hover:bg-blue-700 rounded text-sm text-white disabled:opacity-50 transition-colors"
+        >
+          {setting_up ? 'Logging in...' : 'Connect'}
+        </button>
+      </div>
+      <p className="text-xs text-gray-500 mt-2">
+        A browser window will open for you to log in. Supports SSO and MFA.
+      </p>
+    </div>
+  )
+}
