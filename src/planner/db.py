@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = 1
@@ -154,3 +155,127 @@ class PlannerDB:
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    # --- Account CRUD ---
+
+    def add_account(self, email: str, provider: str = "google", scopes: str = "") -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT id FROM accounts WHERE email = ? AND deleted_at IS NULL", (email,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        cursor = conn.execute(
+            "INSERT INTO accounts (email, provider, scopes) VALUES (?, ?, ?)",
+            (email, provider, scopes),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_account(self, account_id: int) -> dict | None:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,))
+        row = cursor.fetchone()
+        conn.row_factory = None
+        return dict(row) if row else None
+
+    def list_accounts(self) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM accounts WHERE deleted_at IS NULL ORDER BY email"
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def soft_delete_account(self, account_id: int) -> None:
+        conn = self._get_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE accounts SET deleted_at = ? WHERE id = ?", (now, account_id)
+        )
+        conn.commit()
+
+    def update_account_last_sync(self, account_id: int, timestamp: str) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE accounts SET last_sync = ? WHERE id = ?", (timestamp, account_id)
+        )
+        conn.commit()
+
+    # --- Event CRUD ---
+
+    def upsert_event(
+        self,
+        account_id: int,
+        source: str,
+        external_id: str,
+        title: str,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        all_day: bool = False,
+        description: str | None = None,
+        location: str | None = None,
+        event_type: str | None = None,
+        recurring_rule: str | None = None,
+        raw_data: str | None = None,
+    ) -> int:
+        conn = self._get_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = conn.execute(
+            "SELECT id FROM events WHERE source = ? AND external_id = ?",
+            (source, external_id),
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                """UPDATE events SET title=?, description=?, start_time=?, end_time=?,
+                   all_day=?, location=?, event_type=?, recurring_rule=?, raw_data=?, synced_at=?
+                   WHERE id=?""",
+                (title, description, start_time, end_time, int(all_day),
+                 location, event_type, recurring_rule, raw_data, now, row[0]),
+            )
+            conn.commit()
+            return row[0]
+        cursor = conn.execute(
+            """INSERT INTO events (account_id, source, external_id, title, description,
+               start_time, end_time, all_day, location, event_type, recurring_rule, raw_data, synced_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (account_id, source, external_id, title, description, start_time, end_time,
+             int(all_day), location, event_type, recurring_rule, raw_data, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_events(
+        self,
+        source: str | None = None,
+        start_after: str | None = None,
+        end_before: str | None = None,
+    ) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        query = "SELECT * FROM events WHERE 1=1"
+        params: list = []
+        if source:
+            query += " AND source = ?"
+            params.append(source)
+        if start_after:
+            query += " AND start_time >= ?"
+            params.append(start_after)
+        if end_before:
+            query += " AND start_time < ?"
+            params.append(end_before)
+        query += " ORDER BY start_time"
+        cursor = conn.execute(query, params)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def delete_events_for_account(self, account_id: int) -> None:
+        conn = self._get_conn()
+        conn.execute("DELETE FROM events WHERE account_id = ?", (account_id,))
+        conn.commit()
