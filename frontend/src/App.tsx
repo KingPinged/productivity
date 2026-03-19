@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Sidebar from './components/Sidebar'
 import CalendarView from './components/CalendarView'
 import SettingsView from './components/SettingsView'
+import TasksView from './components/TasksView'
 
 type View = 'today' | 'tasks' | 'week' | 'settings'
 
@@ -15,11 +16,7 @@ export default function App() {
         {view === 'today' && <CalendarView mode="day" />}
         {view === 'week' && <CalendarView mode="week" />}
         {view === 'settings' && <SettingsView />}
-        {view === 'tasks' && (
-          <div className="text-gray-400 text-center mt-20">
-            Tasks view — coming in Phase 5
-          </div>
-        )}
+        {view === 'tasks' && <TasksView />}
       </main>
     </div>
   )
