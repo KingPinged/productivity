@@ -14,9 +14,12 @@ from src.planner.api import preferences as prefs_module
 from src.planner.api import schedule as schedule_module
 from src.planner.api import events as events_module
 from src.planner.api import sync as sync_module
+from src.planner.api import canvas as canvas_module
 from src.planner.db import PlannerDB
 from src.planner.ingestion.google_auth import GoogleAuthManager
 from src.planner.ingestion.sync_scheduler import SyncScheduler
+from src.planner.ingestion.canvas import CanvasScraper
+from src.planner.encryption import EncryptionManager
 
 STATIC_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
@@ -98,11 +101,21 @@ def create_app(
     for route in sync_module.router.routes:
         route.dependencies = [require_token]
 
+    # Encryption manager (used by Canvas and sync scheduler)
+    encryption = EncryptionManager()
+
     # Sync scheduler
     scheduler = SyncScheduler(db, auth_module.auth_manager)
     scheduler.start()
     sync_module.sync_callback = scheduler.sync_all
     app.include_router(sync_module.router)
+
+    # Canvas scraper setup
+    canvas_module.canvas_scraper = CanvasScraper(db, encryption)
+    app.dependency_overrides[canvas_module.get_db] = get_db
+    for route in canvas_module.router.routes:
+        route.dependencies = [require_token]
+    app.include_router(canvas_module.router)
 
     serve_dir = static_dir or STATIC_DIR
     if serve_dir.exists():
