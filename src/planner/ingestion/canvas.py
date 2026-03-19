@@ -33,7 +33,7 @@ class CanvasScraper:
             page.goto(canvas_url)
             logger.info("Waiting for user to log in to Canvas at %s ...", canvas_url)
             try:
-                page.wait_for_url("**/dashboard**", timeout=300_000)
+                page.wait_for_url("**/courses**", timeout=300_000)
             except Exception:
                 try:
                     page.wait_for_selector("#global_nav_accounts_link", timeout=60_000)
@@ -124,8 +124,8 @@ class CanvasScraper:
         page = context.new_page()
         total = 0
 
-        # Navigate to dashboard to verify session
-        page.goto(f"{canvas_url}/dashboard", wait_until="domcontentloaded", timeout=30_000)
+        # Navigate to courses page to verify session
+        page.goto(f"{canvas_url}/courses", wait_until="domcontentloaded", timeout=30_000)
         if self._is_session_expired(page, canvas_url):
             raise _SessionExpiredError()
 
