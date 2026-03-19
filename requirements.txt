@@ -9,3 +9,6 @@ aiosqlite>=0.20.0
 pywebview>=5.0
 keyring>=25.0.0
 cryptography>=43.0.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.140.0
+APScheduler>=3.10.4
