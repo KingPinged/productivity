@@ -416,3 +416,50 @@ class PlannerDB:
         params.append(task_id)
         conn.execute(f"UPDATE tasks SET {updates} WHERE id = ?", params)
         conn.commit()
+
+    # --- Schedule Block CRUD ---
+
+    def add_schedule_block(self, date, start_time, end_time, block_type, task_id=None, ai_reason=None, status="scheduled"):
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "INSERT INTO schedule_blocks (task_id, date, start_time, end_time, block_type, status, ai_reason) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (task_id, date, start_time, end_time, block_type, status, ai_reason),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_schedule_blocks(self, date):
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM schedule_blocks WHERE date = ? ORDER BY start_time", (date,))
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def update_block_status(self, block_id, status):
+        conn = self._get_conn()
+        conn.execute("UPDATE schedule_blocks SET status = ? WHERE id = ?", (status, block_id))
+        conn.commit()
+
+    def clear_schedule_blocks(self, date, preserve_completed=False):
+        conn = self._get_conn()
+        if preserve_completed:
+            conn.execute("DELETE FROM schedule_blocks WHERE date = ? AND status != 'completed'", (date,))
+        else:
+            conn.execute("DELETE FROM schedule_blocks WHERE date = ?", (date,))
+        conn.commit()
+
+    # --- AI Context Cache ---
+
+    def save_ai_cache(self, date, context_hash, schedule_json, tokens_used):
+        conn = self._get_conn()
+        conn.execute("INSERT INTO ai_context_cache (date, context_hash, schedule_json, tokens_used) VALUES (?, ?, ?, ?)", (date, context_hash, schedule_json, tokens_used))
+        conn.commit()
+
+    def get_ai_cache(self, date):
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM ai_context_cache WHERE date = ? ORDER BY created_at DESC LIMIT 1", (date,))
+        row = cursor.fetchone()
+        conn.row_factory = None
+        return dict(row) if row else None
