@@ -1,0 +1,71 @@
+<h2>Session Intention Feature — Design Overview</h2>
+<p class="subtitle">Two components: input popup on Start, and persistent top-of-screen bar</p>
+
+<div class="section">
+  <h3>1. Intention Input Popup (on Start click)</h3>
+  <div class="mockup">
+    <div class="mockup-header">Intention Popup — appears when user clicks Start</div>
+    <div class="mockup-body" style="background: #1a1a2e; padding: 40px; display: flex; justify-content: center;">
+      <div style="background: #222244; border: 1px solid #3a3a5c; border-radius: 12px; padding: 32px; width: 450px; text-align: center; font-family: Helvetica, sans-serif;">
+        <div style="font-size: 22px; font-weight: bold; color: #e0e0e0; margin-bottom: 8px;">What's your intention?</div>
+        <div style="font-size: 13px; color: #888; margin-bottom: 20px;">Stay focused. No side quests.</div>
+        <input type="text" placeholder="e.g. Finish the login page redesign" style="width: 100%; box-sizing: border-box; padding: 12px 16px; font-size: 15px; background: #1a1a2e; border: 1px solid #4a4a6c; border-radius: 8px; color: #fff; outline: none; margin-bottom: 20px;" />
+        <div style="display: flex; gap: 12px; justify-content: center;">
+          <button style="padding: 10px 32px; font-size: 14px; background: #4a90d9; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">Start Session</button>
+          <button style="padding: 10px 24px; font-size: 14px; background: transparent; color: #888; border: 1px solid #555; border-radius: 6px; cursor: pointer;">Skip</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ul style="margin-top: 12px; color: #ccc; font-size: 14px;">
+    <li>Modal dialog — blocks interaction until dismissed</li>
+    <li>Enter key submits, Escape skips</li>
+    <li>Skip starts the session with no intention text</li>
+    <li>Text stored in app state for the duration of the session</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>2. Top-of-Screen Intention Bar (during active session)</h3>
+  <div class="mockup">
+    <div class="mockup-header">Intention Bar — always on top, horizontally centered</div>
+    <div class="mockup-body" style="background: #0a0a0a; padding: 0; min-height: 200px; position: relative;">
+      <!-- Simulated screen top -->
+      <div style="display: flex; justify-content: center; padding-top: 0;">
+        <div style="background: rgba(30, 30, 60, 0.92); backdrop-filter: blur(8px); padding: 6px 28px; border-radius: 0 0 10px 10px; font-family: Helvetica, sans-serif; font-size: 13px; color: #d0d0ff; letter-spacing: 0.3px; box-shadow: 0 2px 12px rgba(0,0,0,0.4); border: 1px solid rgba(100,100,180,0.2); border-top: none;">
+          🎯 <span style="font-weight: 600;">Finish the login page redesign</span>
+        </div>
+      </div>
+      <!-- Simulated desktop content behind -->
+      <div style="padding: 40px; color: #444; font-size: 12px; text-align: center;">
+        (rest of screen — bar floats above everything)
+      </div>
+    </div>
+  </div>
+  <ul style="margin-top: 12px; color: #ccc; font-size: 14px;">
+    <li>Frameless, always-on-top window — centered at top of screen</li>
+    <li>Hover → fully transparent (opacity 0); mouse out → fades back</li>
+    <li>Visible during WORKING, BREAK, and PAUSED states</li>
+    <li>Disappears when session ends (IDLE)</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>3. Timer Window Integration</h3>
+  <div class="mockup">
+    <div class="mockup-header">Timer Window — intention displayed below state label</div>
+    <div class="mockup-body" style="background: #222; padding: 30px; text-align: center; font-family: Helvetica, sans-serif;">
+      <div style="font-size: 14px; color: #888; margin-bottom: 4px;">Productivity Timer</div>
+      <div style="font-size: 56px; font-weight: bold; color: #e74c3c; margin: 8px 0;">24:37</div>
+      <div style="font-size: 14px; color: #e74c3c; margin-bottom: 4px;">WORKING</div>
+      <div style="font-size: 13px; color: #8888cc; margin-bottom: 16px; font-style: italic;">🎯 Finish the login page redesign</div>
+      <div style="font-size: 12px; color: #888;">Today: 5 | Total: 142</div>
+      <div style="font-size: 12px; color: #ffa502; margin-top: 4px;">Sets: 1/3</div>
+    </div>
+  </div>
+  <ul style="margin-top: 12px; color: #ccc; font-size: 14px;">
+    <li>Shows below the state label, above cycle counter</li>
+    <li>Italic style with target emoji to distinguish from other labels</li>
+    <li>Hidden when no intention is set (user clicked Skip)</li>
+  </ul>
+</div>

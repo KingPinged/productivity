@@ -3,8 +3,11 @@ Main application orchestration for Productivity Timer (macOS).
 """
 
 import os
+import platform
 import signal
+import subprocess
 import sys
+import threading
 import time
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
@@ -373,6 +376,7 @@ class ProductivityApp:
                 and self.free_time_bucket.has_time()
                 and name.lower() in (app.lower() for app in self.config.get_all_blocked_apps())):
             self.free_time_bucket.drain(seconds)
+            self.root.after(0, self._update_bucket_display)
 
         # Productivity alert: skip browsers (extension handles tab URLs)
         if self.productivity_monitor.is_browser(name):
@@ -391,6 +395,7 @@ class ProductivityApp:
                 and self.free_time_bucket.has_time()
                 and name.lower() in (site.lower() for site in self.config.get_all_blocked_websites())):
             self.free_time_bucket.drain(seconds)
+            self.root.after(0, self._update_bucket_display)
 
         if self.productivity_monitor.classify_website(name):
             self._check_unproductive_alert(name, category)
@@ -634,6 +639,10 @@ class ProductivityApp:
             self._start_blocking()
         elif new_state == TimerState.BREAK:
             self._stop_blocking()
+        elif new_state == TimerState.PAUSED:
+            # If paused from break, activate blocking until resumed
+            if self.timer.paused_from_state == TimerState.BREAK:
+                self._start_blocking()
         elif new_state == TimerState.IDLE:
             # If bucket feature is enabled and bucket is empty, keep blocking
             if (self.config.free_time_bucket_enabled
@@ -695,10 +704,23 @@ class ProductivityApp:
         else:
             self.main_window.update_sets_progress(0, self.config.sets_per_session)
 
+    def _play_alert_sound(self) -> None:
+        """Play a distinctive alert sound."""
+        def _play():
+            if platform.system() == 'Darwin':
+                subprocess.run(
+                    ['afplay', '/System/Library/Sounds/Glass.aiff',
+                     '-v', '5'],
+                    capture_output=True,
+                )
+            else:
+                self.root.bell()
+        threading.Thread(target=_play, daemon=True).start()
+
     def _show_sets_complete_notification(self) -> None:
         """Show notification when all sets are completed."""
         self.main_window.show()
-        self.root.bell()
+        self._play_alert_sound()
         messagebox.showinfo(
             "Session Complete!",
             f"Congratulations! You completed all {self.config.sets_per_session} sets!\n\n"
@@ -710,7 +732,7 @@ class ProductivityApp:
     def _show_notification(self, message: str) -> None:
         """Show a notification to the user."""
         self.main_window.show()
-        self.root.bell()
+        self._play_alert_sound()
 
     def _start_blocking(self) -> None:
         """Start blocking apps and websites."""

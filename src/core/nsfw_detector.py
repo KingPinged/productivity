@@ -4,10 +4,12 @@ Two-tier analysis: free OpenAI Moderation API + cheap GPT-4o-mini for ambiguous 
 """
 
 import json
+import re
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
 from datetime import datetime
+from html.parser import HTMLParser
 from typing import Callable, Optional, Tuple
 
 from src.data.nsfw_cache import NSFWCache, CacheEntry
@@ -26,6 +28,108 @@ class PageSignals:
 # Thresholds for two-tier detection
 MODERATION_SAFE_THRESHOLD = 0.4
 MODERATION_NSFW_THRESHOLD = 0.9
+
+
+class _PageContentParser(HTMLParser):
+    """Lightweight HTML parser that extracts title, meta description, and body text."""
+
+    def __init__(self):
+        super().__init__()
+        self.title = ''
+        self.meta_description = ''
+        self._body_parts: list[str] = []
+        self._in_title = False
+        self._in_body = False
+        self._in_script = False
+        self._in_style = False
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        tag = tag.lower()
+        if tag == 'title':
+            self._in_title = True
+        elif tag == 'meta':
+            attr_dict = {k.lower(): v for k, v in attrs if v}
+            name = attr_dict.get('name', '').lower()
+            if name == 'description':
+                self.meta_description = attr_dict.get('content', '')
+        elif tag == 'body':
+            self._in_body = True
+        elif tag == 'script':
+            self._in_script = True
+        elif tag == 'style':
+            self._in_style = True
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == 'title':
+            self._in_title = False
+        elif tag == 'script':
+            self._in_script = False
+        elif tag == 'style':
+            self._in_style = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.title += data
+        elif self._in_body and not self._in_script and not self._in_style:
+            text = data.strip()
+            if text:
+                self._body_parts.append(text)
+
+    @property
+    def body_text(self) -> str:
+        return ' '.join(self._body_parts)[:500]
+
+
+def fetch_page_signals(domain: str, timeout: int = 8) -> Optional[PageSignals]:
+    """
+    Fetch a page's HTML and extract signals for NSFW classification.
+    Returns None on any network/parse error (fail-open).
+    """
+    url = f"https://{domain}"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers, method='GET')
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            # Only parse HTML responses
+            content_type = resp.headers.get('Content-Type', '')
+            if 'text/html' not in content_type and 'text/xhtml' not in content_type:
+                return None
+
+            # Read up to 100KB to avoid huge pages
+            raw = resp.read(102400)
+            # Try to detect encoding
+            charset = 'utf-8'
+            match = re.search(r'charset=([^\s;]+)', content_type)
+            if match:
+                charset = match.group(1)
+            html = raw.decode(charset, errors='replace')
+
+        parser = _PageContentParser()
+        parser.feed(html)
+
+        title = parser.title.strip()
+        meta = parser.meta_description.strip()
+        body = parser.body_text.strip()
+
+        # If we got nothing useful, return None
+        if not title and not meta and not body:
+            return None
+
+        return PageSignals(
+            url=url,
+            domain=domain,
+            title=title,
+            meta_description=meta,
+            body_text=body,
+        )
+    except Exception as e:
+        print(f"[NSFW] Failed to fetch page content for {domain}: {e}")
+        return None
 
 
 class NSFWDetector:
