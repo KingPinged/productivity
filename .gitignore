@@ -50,3 +50,6 @@ productivity_timer_data/
 
 # Exception: include frontend dist build
 !frontend/dist/
+
+# Environment secrets
+.env

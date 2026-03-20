@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  planner:
+    build: .
+    ports:
+      - "8321:8321"
+    volumes:
+      - planner_data:/app/data
+    environment:
+      - PLANNER_PASSWORD=${PLANNER_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_EMAIL=${VAPID_EMAIL}
+    restart: unless-stopped
+
+volumes:
+  planner_data:
