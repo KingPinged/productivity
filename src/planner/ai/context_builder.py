@@ -32,6 +32,9 @@ class ContextBuilder:
                     "current_grade": c["current_grade"],
                 })
 
+        # AI memories (persistent cross-session)
+        memories = self._db.get_memories(limit=20)
+
         # Recent emails (from events with source='gmail')
         recent_emails = [
             {
@@ -85,6 +88,10 @@ class ContextBuilder:
             ],
             "recent_emails": recent_emails,
             "course_grades": course_grades,
+            "memories": [
+                {"content": m["content"], "category": m["category"], "created_at": m["created_at"]}
+                for m in memories
+            ],
         }
 
     def compute_hash(self, context: dict) -> str:

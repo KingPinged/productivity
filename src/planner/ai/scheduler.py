@@ -111,11 +111,45 @@ class AIScheduler:
 
             self._db.save_ai_cache(date, context_hash, json.dumps(result), tokens_used)
             self.store_schedule(date, result)
+
+            context = self._context_builder.build(date)
+            self._extract_and_store_memories(date, result, context.get("user_context", []))
+
             return result
 
         except Exception as e:
             logger.error("Replan failed: %s", e)
             return None
+
+    def _extract_and_store_memories(self, date: str, result: dict, user_context: list) -> None:
+        """Store important scheduling decisions as memories."""
+        # Store what was planned
+        tasks_today = result.get("tasks_today", [])
+        if tasks_today:
+            self._db.add_memory(
+                category="daily_plan",
+                content=f"On {date}, planned to work on: {', '.join(tasks_today)}",
+                importance=3,
+            )
+
+        # Store user context as memories
+        for ctx in user_context:
+            msg = ctx.get("message", "") if isinstance(ctx, dict) else str(ctx)
+            if msg:
+                self._db.add_memory(
+                    category="user_input",
+                    content=f"On {date}, user said: {msg}",
+                    importance=5,
+                )
+
+        # Store deferred tasks
+        tasks_later = result.get("tasks_later", [])
+        if tasks_later:
+            self._db.add_memory(
+                category="deferred",
+                content=f"On {date}, deferred: {', '.join(tasks_later)}",
+                importance=4,
+            )
 
     def parse_response(self, raw_text: str) -> dict | None:
         """Parse and validate Claude's JSON response."""
