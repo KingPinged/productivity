@@ -17,6 +17,7 @@ from src.planner.api import sync as sync_module
 from src.planner.api import canvas as canvas_module
 from src.planner.api import tasks as tasks_module
 from src.planner.api import courses as courses_module
+from src.planner.api import chat as chat_module
 from src.planner.api import reminders as reminders_module
 from src.planner.reminders.service import ReminderService
 from src.planner.reminders.notifier import Notifier
@@ -127,6 +128,7 @@ def create_app(
     anthropic_key = db.get_preference("anthropic_api_key")
     if anthropic_key:
         schedule_module.ai_scheduler = AIScheduler(db, api_key=anthropic_key)
+        chat_module.ai_scheduler = schedule_module.ai_scheduler
 
     # Course routes
     app.dependency_overrides[courses_module.get_db] = get_db
@@ -145,6 +147,13 @@ def create_app(
     for route in reminders_module.router.routes:
         route.dependencies = [require_token]
     app.include_router(reminders_module.router)
+
+    # Chat route
+    app.dependency_overrides[chat_module.get_db] = get_db
+    chat_module.ai_scheduler = schedule_module.ai_scheduler
+    for route in chat_module.router.routes:
+        route.dependencies = [require_token]
+    app.include_router(chat_module.router)
 
     # Reminder service (check every 30 seconds)
     notifier = Notifier()
