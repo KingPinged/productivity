@@ -1,3 +1,4 @@
+import json
 import threading
 from fastapi import APIRouter, Depends, BackgroundTasks
 
@@ -41,3 +42,21 @@ def delete_config(config_id: int, db: PlannerDB = Depends(get_db)):
         db.update_task_status(task["id"], "skipped")
     db.soft_delete_canvas_config(config_id)
     return {"status": "deleted"}
+
+
+@router.post("/cookies/{config_id}")
+def paste_cookies(config_id: int, body: dict, db: PlannerDB = Depends(get_db)):
+    """Update Canvas cookies from browser paste."""
+    cookies_json = body.get("cookies", "")
+    if not cookies_json:
+        return {"error": "No cookies provided"}
+    try:
+        cookies = json.loads(cookies_json) if isinstance(cookies_json, str) else cookies_json
+        from src.planner.encryption import EncryptionManager
+        encryption = EncryptionManager()
+        encrypted = encryption.encrypt(json.dumps(cookies))
+        db.update_canvas_cookies(config_id, encrypted)
+        db.update_canvas_status(config_id, "active")
+        return {"status": "ok"}
+    except Exception as e:
+        return {"error": str(e)}

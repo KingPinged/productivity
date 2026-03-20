@@ -26,7 +26,7 @@ from src.planner.ai.scheduler import AIScheduler
 from src.planner.db import PlannerDB
 from src.planner.ingestion.google_auth import GoogleAuthManager
 from src.planner.ingestion.sync_scheduler import SyncScheduler
-from src.planner.ingestion.canvas import CanvasScraper
+from src.planner.ingestion.canvas_requests import CanvasRequestsScraper
 from src.planner.encryption import EncryptionManager
 
 STATIC_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
@@ -120,7 +120,7 @@ def create_app(
     app.include_router(sync_module.router)
 
     # Canvas scraper setup
-    canvas_module.canvas_scraper = CanvasScraper(db, encryption)
+    canvas_module.canvas_scraper = CanvasRequestsScraper(db, encryption)
     app.dependency_overrides[canvas_module.get_db] = get_db
     for route in canvas_module.router.routes:
         route.dependencies = [require_token]

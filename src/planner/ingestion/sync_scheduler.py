@@ -5,7 +5,7 @@ from src.planner.db import PlannerDB
 from src.planner.ingestion.google_auth import GoogleAuthManager
 from src.planner.ingestion.gcal import GCalSyncer
 from src.planner.ingestion.gmail import GmailSyncer
-from src.planner.ingestion.canvas import CanvasScraper
+from src.planner.ingestion.canvas_requests import CanvasRequestsScraper
 from src.planner.encryption import EncryptionManager
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ class SyncScheduler:
         self._auth_manager = auth_manager
         self._gcal_syncer = GCalSyncer(db)
         self._gmail_syncer = GmailSyncer(db)
-        self._canvas_scraper = CanvasScraper(db, encryption) if encryption else None
+        self._canvas_scraper = CanvasRequestsScraper(db, encryption) if encryption else None
         self._scheduler = BackgroundScheduler()
         self._lock = threading.Lock()
 
