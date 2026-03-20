@@ -107,6 +107,46 @@ TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "add_calendar_event",
+        "description": "Add a new event to the calendar (gym, appointment, social event, etc). This creates a visible calendar event, not just a schedule block.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Event title (e.g., 'Gym', 'Doctor appointment')"},
+                "date": {"type": "string", "description": "Date (YYYY-MM-DD). Defaults to today."},
+                "start_time": {"type": "string", "description": "Start time (HH:MM in 24h format)"},
+                "end_time": {"type": "string", "description": "End time (HH:MM in 24h format)"},
+                "event_type": {"type": "string", "description": "Type: meeting, personal, class, other", "default": "personal"},
+            },
+            "required": ["title", "start_time", "end_time"],
+        },
+    },
+    {
+        "name": "edit_calendar_event",
+        "description": "Edit an existing calendar event's time or title. Search by title to find it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "search_title": {"type": "string", "description": "Title to search for (partial match)"},
+                "new_title": {"type": "string", "description": "New title (optional)"},
+                "new_start_time": {"type": "string", "description": "New start time HH:MM (optional)"},
+                "new_end_time": {"type": "string", "description": "New end time HH:MM (optional)"},
+            },
+            "required": ["search_title"],
+        },
+    },
+    {
+        "name": "delete_calendar_event",
+        "description": "Delete a calendar event by title (partial match).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "search_title": {"type": "string", "description": "Title to search for (partial match)"},
+            },
+            "required": ["search_title"],
+        },
+    },
 ]
 
 
@@ -185,6 +225,60 @@ def _execute_tool(tool_name: str, tool_input: dict, db: PlannerDB) -> str:
         for m in memories:
             lines.append(f"- [{m['category']}] {m['content']}")
         return "\n".join(lines)
+
+    elif tool_name == "add_calendar_event":
+        import secrets
+        target_date = tool_input.get("date", today)
+        start = f"{target_date}T{tool_input['start_time']}:00"
+        end = f"{target_date}T{tool_input['end_time']}:00"
+        eid = db.upsert_event(
+            account_id=0,
+            source="manual",
+            external_id=f"manual:{secrets.token_urlsafe(8)}",
+            title=tool_input["title"],
+            start_time=start,
+            end_time=end,
+            event_type=tool_input.get("event_type", "personal"),
+        )
+        return f"Added calendar event: \"{tool_input['title']}\" on {target_date} from {tool_input['start_time']} to {tool_input['end_time']} (id={eid})"
+
+    elif tool_name == "edit_calendar_event":
+        search = tool_input["search_title"].lower()
+        events = db.get_events()
+        for e in events:
+            if search in e["title"].lower():
+                updates = {}
+                new_title = tool_input.get("new_title") or e["title"]
+                new_start = e["start_time"]
+                new_end = e["end_time"]
+                if tool_input.get("new_start_time"):
+                    date_part = e["start_time"][:10] if e["start_time"] and len(e["start_time"]) > 10 else today
+                    new_start = f"{date_part}T{tool_input['new_start_time']}:00"
+                if tool_input.get("new_end_time"):
+                    date_part = e["end_time"][:10] if e["end_time"] and len(e["end_time"]) > 10 else today
+                    new_end = f"{date_part}T{tool_input['new_end_time']}:00"
+                db.upsert_event(
+                    account_id=e.get("account_id", 0),
+                    source=e["source"],
+                    external_id=e["external_id"],
+                    title=new_title,
+                    start_time=new_start,
+                    end_time=new_end,
+                    event_type=e.get("event_type"),
+                )
+                return f"Updated event \"{e['title']}\" -> title=\"{new_title}\", {new_start} to {new_end}"
+        return f"Could not find event matching \"{tool_input['search_title']}\"."
+
+    elif tool_name == "delete_calendar_event":
+        search = tool_input["search_title"].lower()
+        events = db.get_events()
+        for e in events:
+            if search in e["title"].lower():
+                conn = db._get_conn()
+                conn.execute("DELETE FROM events WHERE id = ?", (e["id"],))
+                conn.commit()
+                return f"Deleted event: \"{e['title']}\""
+        return f"Could not find event matching \"{tool_input['search_title']}\"."
 
     return f"Unknown tool: {tool_name}"
 
