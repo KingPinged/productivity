@@ -5,6 +5,10 @@ interface ContextInputProps {
   onSubmit?: (message: string) => Promise<void>
   onReplan?: () => Promise<void>
   onChatDone?: () => void
+  chatResponse: string | null
+  setChatResponse: (v: string | null) => void
+  chatActions: string | null
+  setChatActions: (v: string | null) => void
 }
 
 const SUGGESTIONS = [
@@ -20,12 +24,10 @@ function getToken(): string {
   return (window as any).__PLANNER_TOKEN__ || ''
 }
 
-export default function ContextInput({ onChatDone }: ContextInputProps) {
+export default function ContextInput({ onChatDone, chatResponse, setChatResponse, chatActions: actions, setChatActions: setActions }: ContextInputProps) {
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [streaming, setStreaming] = useState(false)
-  const [chatResponse, setChatResponse] = useState<string | null>(null)
-  const [actions, setActions] = useState<string | null>(null)
   const responseRef = useRef('')
 
   const handleSubmit = async (text: string) => {

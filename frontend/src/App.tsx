@@ -21,6 +21,8 @@ export default function App() {
   const { triggerReplan } = useSchedule(today)
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
+  const [chatResponse, setChatResponse] = useState<string | null>(null)
+  const [chatActions, setChatActions] = useState<string | null>(null)
 
   const handleReplan = useCallback(async () => {
     await triggerReplan()
@@ -46,7 +48,7 @@ export default function App() {
                 {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
               </h1>
               <p className="text-secondary text-sm mb-5">Plan your day, stay on track</p>
-              <ContextInput onSubmit={addMessage} onReplan={handleReplan} onChatDone={handleChatDone} />
+              <ContextInput onSubmit={addMessage} onReplan={handleReplan} onChatDone={handleChatDone} chatResponse={chatResponse} setChatResponse={setChatResponse} chatActions={chatActions} setChatActions={setChatActions} />
               <DaySummary
                 summary={summary}
                 emailAlerts={activeAlerts}
