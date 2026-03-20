@@ -143,6 +143,14 @@ CREATE TABLE IF NOT EXISTS ai_memory (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -739,3 +747,38 @@ class PlannerDB:
         rows = [dict(r) for r in cursor.fetchall()]
         conn.row_factory = None
         return rows
+
+    # --- Push Subscriptions ---
+
+    def add_push_subscription(self, endpoint: str, p256dh: str, auth: str) -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT id FROM push_subscriptions WHERE endpoint = ?", (endpoint,)
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                "UPDATE push_subscriptions SET p256dh=?, auth=? WHERE id=?",
+                (p256dh, auth, row[0]),
+            )
+            conn.commit()
+            return row[0]
+        cursor = conn.execute(
+            "INSERT INTO push_subscriptions (endpoint, p256dh, auth) VALUES (?, ?, ?)",
+            (endpoint, p256dh, auth),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_push_subscriptions(self) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM push_subscriptions")
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def remove_push_subscription(self, endpoint: str) -> None:
+        conn = self._get_conn()
+        conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+        conn.commit()

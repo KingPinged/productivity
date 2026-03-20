@@ -19,6 +19,7 @@ from src.planner.api import tasks as tasks_module
 from src.planner.api import courses as courses_module
 from src.planner.api import chat as chat_module
 from src.planner.api import reminders as reminders_module
+from src.planner.api import push as push_module
 from src.planner.reminders.service import ReminderService
 from src.planner.reminders.notifier import Notifier
 from src.planner.ai.scheduler import AIScheduler
@@ -148,6 +149,12 @@ def create_app(
     for route in reminders_module.router.routes:
         route.dependencies = [require_token]
     app.include_router(reminders_module.router)
+
+    # Push subscription routes
+    app.dependency_overrides[push_module.get_db] = get_db
+    for route in push_module.router.routes:
+        route.dependencies = [require_token]
+    app.include_router(push_module.router)
 
     # Chat route
     app.dependency_overrides[chat_module.get_db] = get_db
