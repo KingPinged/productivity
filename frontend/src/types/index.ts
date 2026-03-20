@@ -67,6 +67,15 @@ export interface Task {
   current_grade: string | null
 }
 
+export interface Grade {
+  id: number
+  course_id: number
+  assignment_name: string
+  score: string | null
+  points_possible: string | null
+  status: string
+}
+
 export interface Course {
   id: number
   canvas_course_id: string
@@ -77,4 +86,5 @@ export interface Course {
   instructor: string | null
   schedule_info: string | null
   updated_at: string | null
+  current_grade?: string | null
 }

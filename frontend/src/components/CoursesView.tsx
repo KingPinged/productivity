@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useCourses } from '../hooks/useCourses'
 import { useTasks } from '../hooks/useTasks'
+import { apiFetch } from '../api/client'
 import type { Course, Task } from '../types'
 
 export default function CoursesView() {
@@ -41,7 +42,12 @@ export default function CoursesView() {
                   : 'bg-surface border-border hover:shadow-card shadow-soft'
               }`}
             >
-              <p className={`font-medium text-sm ${isSelected ? 'text-accent' : 'text-primary'}`}>{course.code || course.name}</p>
+              <div className="flex items-center justify-between">
+                <p className={`font-medium text-sm ${isSelected ? 'text-accent' : 'text-primary'}`}>{course.code || course.name}</p>
+                {course.current_grade && (
+                  <span className="text-xs font-semibold text-accent bg-accent-light px-2 py-0.5 rounded-full">{course.current_grade}</span>
+                )}
+              </div>
               <p className="text-secondary text-xs mt-0.5 truncate">{course.name}</p>
               <div className="flex items-center gap-3 mt-2 text-xs text-muted">
                 <span>{courseTasks.length} pending tasks</span>
@@ -67,6 +73,16 @@ export default function CoursesView() {
 }
 
 function CourseDetail({ course, tasks }: { course: Course; tasks: Task[] }) {
+  const [grades, setGrades] = useState<any[]>([])
+  const [currentGrade, setCurrentGrade] = useState<string | null>(course.current_grade || null)
+
+  useEffect(() => {
+    apiFetch<any>(`/api/courses/${course.id}`).then(data => {
+      if (data.grades) setGrades(data.grades)
+      if (data.current_grade) setCurrentGrade(data.current_grade)
+    }).catch(() => {})
+  }, [course.id])
+
   return (
     <div>
       <h2 className="font-display font-bold text-xl text-primary">{course.code || course.name}</h2>
@@ -97,6 +113,30 @@ function CourseDetail({ course, tasks }: { course: Course; tasks: Task[] }) {
           </div>
         ) : (
           <p className="text-muted text-sm">No syllabus found on Canvas.</p>
+        )}
+      </div>
+
+      {/* Grades Section */}
+      <div className="mt-6 p-4 bg-sand rounded-xl">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-display font-semibold text-sm text-secondary uppercase tracking-wider">Grades</h3>
+          {currentGrade && (
+            <span className="text-lg font-display font-bold text-primary">{currentGrade}</span>
+          )}
+        </div>
+        {grades.length > 0 ? (
+          <div className="space-y-1.5">
+            {grades.map((g: any, i: number) => (
+              <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
+                <span className="text-sm text-primary truncate flex-1">{g.assignment_name}</span>
+                <span className={`text-sm font-medium ml-4 ${g.score ? 'text-primary' : 'text-muted'}`}>
+                  {g.score || '-'}{g.points_possible ? ` / ${g.points_possible}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-muted text-sm">No grades available yet.</p>
         )}
       </div>
 

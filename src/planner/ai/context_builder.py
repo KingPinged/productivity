@@ -21,6 +21,17 @@ class ContextBuilder:
         # User context messages
         user_context = self._db.get_active_context()
 
+        # Course grades for AI prioritization
+        courses = self._db.get_courses()
+        course_grades = []
+        for c in courses:
+            if c.get("current_grade"):
+                course_grades.append({
+                    "course": c["name"],
+                    "code": c.get("code"),
+                    "current_grade": c["current_grade"],
+                })
+
         # Recent emails (from events with source='gmail')
         recent_emails = [
             {
@@ -73,6 +84,7 @@ class ContextBuilder:
                 for c in user_context
             ],
             "recent_emails": recent_emails,
+            "course_grades": course_grades,
         }
 
     def compute_hash(self, context: dict) -> str:

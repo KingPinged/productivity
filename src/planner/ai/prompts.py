@@ -105,6 +105,13 @@ def build_user_prompt(context: dict) -> str:
                 line += f" (current grade: {t['current_grade']})"
             parts.append(line)
 
+    # Course grades
+    grades = context.get("course_grades", [])
+    if grades:
+        parts.append("\n## Current Course Grades:")
+        for g in grades:
+            parts.append(f"- {g['code'] or g['course']}: {g['current_grade']}")
+
     # Recent emails for alert detection
     emails = context.get("recent_emails", [])
     if emails:
