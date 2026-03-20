@@ -20,4 +20,21 @@ def get_course(course_id: int, db: PlannerDB = Depends(get_db)):
     # Also get tasks for this course
     tasks = db.get_tasks(source="canvas")
     course_tasks = [t for t in tasks if t.get("course") == course["name"]]
-    return {**course, "tasks": course_tasks}
+    grades = db.get_grades_for_course(course_id)
+    return {**course, "tasks": course_tasks, "grades": grades}
+
+@router.get("/grades")
+def get_grades_summary(db: PlannerDB = Depends(get_db)):
+    courses = db.get_courses()
+    result = []
+    for c in courses:
+        grades = db.get_grades_for_course(c["id"])
+        result.append({
+            "course_id": c["id"],
+            "course_name": c["name"],
+            "course_code": c["code"],
+            "current_grade": c.get("current_grade"),
+            "total_assignments": len(grades),
+            "graded": len([g for g in grades if g["score"]]),
+        })
+    return result
