@@ -80,3 +80,27 @@ class Notifier:
             ctypes.windll.user32.MessageBeep(0)
         except Exception:
             pass
+
+    def send_web_push(self, title: str, message: str, subscriptions: list[dict]) -> None:
+        import os, json
+        from pywebpush import webpush, WebPushException
+
+        vapid_private = os.environ.get("VAPID_PRIVATE_KEY", "")
+        vapid_email = os.environ.get("VAPID_EMAIL", "mailto:you@example.com")
+        if not vapid_private:
+            return
+
+        payload = json.dumps({"title": title, "body": message, "url": "/"})
+        for sub in subscriptions:
+            try:
+                webpush(
+                    subscription_info={
+                        "endpoint": sub["endpoint"],
+                        "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
+                    },
+                    data=payload,
+                    vapid_private_key=vapid_private,
+                    vapid_claims={"sub": vapid_email},
+                )
+            except Exception as e:
+                logger.warning("Web push failed: %s", e)

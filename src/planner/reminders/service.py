@@ -150,6 +150,10 @@ class ReminderService:
                 reminder_type=reminder["reminder_type"],
             )
 
+            subscriptions = self._db.get_push_subscriptions()
+            if subscriptions:
+                self._notifier.send_web_push(title, reminder["message"], subscriptions)
+
             self._db.mark_reminder_fired(reminder["id"])
             fired += 1
 
