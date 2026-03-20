@@ -27,7 +27,7 @@ export default function QuickAddTask({ onAdd }: QuickAddTaskProps) {
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Add a task..."
-        className="flex-1 bg-white border border-border rounded-xl px-3 py-2 text-sm text-primary placeholder-muted focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
+        className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-primary placeholder-muted focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
       />
       <button
         type="submit"

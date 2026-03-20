@@ -43,7 +43,7 @@ export default function DaySummary({ summary, emailAlerts, tasksToday, tasksLate
 
       {/* Daily Summary */}
       {summary && (
-        <div className="p-4 bg-white rounded-xl border border-border shadow-soft">
+        <div className="p-4 bg-surface rounded-xl border border-border shadow-soft">
           <h3 className="font-display font-semibold text-xs text-muted uppercase tracking-wider mb-2">Today's Plan</h3>
           <p className="text-sm text-primary leading-relaxed">{summary}</p>
 

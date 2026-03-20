@@ -40,7 +40,7 @@ export default function ContextInput({ onSubmit, onReplan }: ContextInputProps) 
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit(message)}
           placeholder="Tell the AI about your day... (e.g., 'I'm skipping office hours')"
-          className="flex-1 bg-white border border-border rounded-lg px-4 py-2.5 text-sm text-primary placeholder-muted focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
+          className="flex-1 bg-surface border border-border rounded-lg px-4 py-2.5 text-sm text-primary placeholder-muted focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
           disabled={sending}
         />
         <button
@@ -57,7 +57,7 @@ export default function ContextInput({ onSubmit, onReplan }: ContextInputProps) 
             key={s}
             onClick={() => handleSubmit(s)}
             disabled={sending}
-            className="px-2.5 py-1 bg-white hover:bg-sand border border-border rounded-full text-xs text-secondary hover:text-primary transition-colors disabled:opacity-50"
+            className="px-2.5 py-1 bg-surface hover:bg-sand border border-border rounded-full text-xs text-secondary hover:text-primary transition-colors disabled:opacity-50"
           >
             {s}
           </button>

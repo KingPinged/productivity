@@ -61,7 +61,7 @@ export default function Sidebar({ currentView, onNavigate }: SidebarProps) {
             className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2.5 transition-all duration-150 text-sm font-medium ${
               currentView === view
                 ? 'bg-accent text-white shadow-soft'
-                : 'text-secondary hover:bg-white hover:text-primary hover:shadow-soft'
+                : 'text-secondary hover:bg-surface hover:text-primary hover:shadow-soft'
             }`}
           >
             <span className="text-base">{icon}</span>
@@ -75,7 +75,7 @@ export default function Sidebar({ currentView, onNavigate }: SidebarProps) {
           Up Next
         </h3>
         {nextBlock ? (
-          <div className="bg-white rounded-xl p-3 shadow-soft border border-border">
+          <div className="bg-surface rounded-xl p-3 shadow-soft border border-border">
             <p className="text-primary text-sm font-semibold">{nextBlock.block_type}</p>
             <p className="text-secondary text-xs mt-0.5">{nextBlock.start_time} - {nextBlock.end_time}</p>
             {nextBlock.ai_reason && (

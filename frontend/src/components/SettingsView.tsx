@@ -55,7 +55,7 @@ export default function SettingsView() {
               <select
                 value={form[field.key] || ''}
                 onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                className="w-full bg-white border border-border rounded-lg px-3 py-2 text-primary focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
+                className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-primary focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
               >
                 {'options' in field && field.options.map((opt) => (
                   <option key={opt} value={opt}>{opt}</option>
@@ -66,7 +66,7 @@ export default function SettingsView() {
                 type={field.type}
                 value={form[field.key] || ''}
                 onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                className="w-full bg-white border border-border rounded-lg px-3 py-2 text-primary focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
+                className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-primary focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
               />
             )}
           </div>
@@ -80,7 +80,7 @@ export default function SettingsView() {
           value={form['anthropic_api_key'] || ''}
           onChange={(e) => setForm({ ...form, anthropic_api_key: e.target.value })}
           placeholder="sk-ant-..."
-          className="w-full bg-white border border-border rounded-lg px-3 py-2 text-primary font-mono text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
+          className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-primary font-mono text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
         />
         <p className="text-xs text-muted mt-1">
           Required for AI scheduling. Restart planner after changing.

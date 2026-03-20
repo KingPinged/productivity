@@ -49,7 +49,7 @@ export default function App() {
               />
             </div>
             <div className="flex-1 min-h-0 px-8 pb-6">
-              <div className="h-full bg-white rounded-2xl shadow-soft border border-border overflow-hidden">
+              <div className="h-full bg-surface rounded-2xl shadow-soft border border-border overflow-hidden">
                 <CalendarView mode="day" />
               </div>
             </div>
@@ -58,7 +58,7 @@ export default function App() {
         {view === 'week' && (
           <div className="h-full p-8">
             <h1 className="font-display font-bold text-2xl text-primary mb-6">Week Overview</h1>
-            <div className="h-[calc(100%-3.5rem)] bg-white rounded-2xl shadow-soft border border-border overflow-hidden">
+            <div className="h-[calc(100%-3.5rem)] bg-surface rounded-2xl shadow-soft border border-border overflow-hidden">
               <CalendarView mode="week" />
             </div>
           </div>

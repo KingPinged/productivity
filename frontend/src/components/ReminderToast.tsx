@@ -28,7 +28,7 @@ export default function ReminderToast() {
       {reminders.map(reminder => (
         <div
           key={reminder.id}
-          className={`bg-white border border-border border-l-4 ${TYPE_COLORS[reminder.reminder_type] || 'border-border'} rounded-xl p-4 shadow-elevated animate-pulse-once`}
+          className={`bg-surface border border-border border-l-4 ${TYPE_COLORS[reminder.reminder_type] || 'border-border'} rounded-xl p-4 shadow-elevated animate-pulse-once`}
         >
           <div className="flex items-start gap-3">
             <span className="text-lg flex-shrink-0">

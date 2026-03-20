@@ -38,7 +38,7 @@ export default function CoursesView() {
               className={`w-full text-left p-4 rounded-xl border transition-all ${
                 isSelected
                   ? 'bg-accent-light border-accent shadow-card'
-                  : 'bg-white border-border hover:shadow-card shadow-soft'
+                  : 'bg-surface border-border hover:shadow-card shadow-soft'
               }`}
             >
               <p className={`font-medium text-sm ${isSelected ? 'text-accent' : 'text-primary'}`}>{course.code || course.name}</p>

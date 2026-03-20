@@ -19,7 +19,7 @@ export default function BlockDetail({ block, onClose, onComplete, onSkip }: Bloc
   return (
     <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50" onClick={onClose}>
       <div
-        className="bg-white border border-border rounded-2xl p-5 w-96 shadow-elevated"
+        className="bg-surface border border-border rounded-2xl p-5 w-96 shadow-elevated"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">

@@ -41,7 +41,7 @@ export default function TaskCard({ task, onToggleStatus, onDelete }: TaskCardPro
   const deadline = formatDeadline(task.deadline)
 
   return (
-    <div className={`p-3 bg-white border border-border rounded-xl shadow-soft hover:shadow-card transition-shadow ${isDone ? 'opacity-60' : ''}`}>
+    <div className={`p-3 bg-surface border border-border rounded-xl shadow-soft hover:shadow-card transition-shadow ${isDone ? 'opacity-60' : ''}`}>
       <div className="flex items-start gap-2">
         <button
           onClick={() => onToggleStatus(task.id, isDone ? 'pending' : 'done')}
