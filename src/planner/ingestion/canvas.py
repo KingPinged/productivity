@@ -237,20 +237,66 @@ class CanvasScraper:
             try:
                 page.goto(
                     f"{canvas_url}/courses/{course_id}/grades",
-                    wait_until="domcontentloaded", timeout=30_000,
+                    wait_until="networkidle", timeout=30_000,
                 )
-                grades_html = page.content()
-                grade_info = parser.parse_grades_page(grades_html, course_id)
 
-                if grade_info["current_grade"]:
-                    tasks = self._db.get_tasks(source="canvas")
-                    for task in tasks:
-                        if task["course"] == course_name:
-                            self._db._get_conn().execute(
-                                "UPDATE tasks SET current_grade = ? WHERE id = ?",
-                                (grade_info["current_grade"], task["id"]),
+                # Get the course's DB ID
+                conn = self._db._get_conn()
+                cursor = conn.execute("SELECT id FROM courses WHERE canvas_course_id = ?", (course_id,))
+                course_row = cursor.fetchone()
+                db_course_id = course_row[0] if course_row else None
+
+                if db_course_id:
+                    # Extract grades via JS
+                    grade_data = page.evaluate('''() => {
+                        const rows = document.querySelectorAll('tr.student_assignment');
+                        const grades = [];
+                        rows.forEach(row => {
+                            const titleEl = row.querySelector('th.title a, th.title span');
+                            const scoreEl = row.querySelector('span.original_score, span.grade');
+                            const possibleEl = row.querySelector('td.possible.points_possible');
+                            if (!titleEl) return;
+                            let score = scoreEl ? scoreEl.textContent.trim() : null;
+                            if (score && (score.includes('Click to') || score.includes('Instructor has not'))) {
+                                const num = score.match(/[\\d.]+/);
+                                score = num ? num[0] : null;
+                            }
+                            grades.push({
+                                name: titleEl.textContent.trim(),
+                                score: score,
+                                possible: possibleEl ? possibleEl.textContent.trim() : null,
+                            });
+                        });
+                        const finalEl = document.querySelector('.final_grade .grade');
+                        const finalGrade = finalEl ? finalEl.textContent.trim() : null;
+                        return { grades, finalGrade };
+                    }''')
+
+                    # Store individual grades
+                    for g in grade_data.get("grades", []):
+                        if g["name"]:
+                            status = "graded" if g["score"] else "ungraded"
+                            self._db.upsert_grade(
+                                course_id=db_course_id,
+                                assignment_name=g["name"],
+                                score=g["score"],
+                                points_possible=g["possible"],
+                                status=status,
                             )
-                    self._db._get_conn().commit()
+
+                    # Store overall course grade
+                    final = grade_data.get("finalGrade")
+                    if final:
+                        self._db.update_course_grade(db_course_id, final)
+                        # Also update tasks with this grade
+                        tasks = self._db.get_tasks(source="canvas")
+                        for task in tasks:
+                            if task["course"] == course_name:
+                                self._db._get_conn().execute(
+                                    "UPDATE tasks SET current_grade = ? WHERE id = ?",
+                                    (final, task["id"]),
+                                )
+                        self._db._get_conn().commit()
             except Exception as e:
                 logger.warning("Failed to scrape grades for %s: %s", course_name, e)
 
