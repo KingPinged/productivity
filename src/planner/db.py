@@ -124,6 +124,16 @@ CREATE TABLE IF NOT EXISTS user_context (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     active INTEGER DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS grades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id INTEGER REFERENCES courses(id),
+    assignment_name TEXT NOT NULL,
+    score TEXT,
+    points_possible TEXT,
+    status TEXT DEFAULT 'graded',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -142,6 +152,13 @@ class PlannerDB:
                 (SCHEMA_VERSION,),
             )
         conn.commit()
+
+        # Migration: add current_grade to courses if missing
+        try:
+            conn.execute("ALTER TABLE courses ADD COLUMN current_grade TEXT")
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -619,4 +636,60 @@ class PlannerDB:
     def clear_context(self) -> None:
         conn = self._get_conn()
         conn.execute("UPDATE user_context SET active = 0")
+        conn.commit()
+
+    # --- Grade CRUD ---
+
+    def upsert_grade(self, course_id: int, assignment_name: str, score: str | None = None,
+                     points_possible: str | None = None, status: str = "graded") -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT id FROM grades WHERE course_id = ? AND assignment_name = ?",
+            (course_id, assignment_name),
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                "UPDATE grades SET score=?, points_possible=?, status=? WHERE id=?",
+                (score, points_possible, status, row[0]),
+            )
+            conn.commit()
+            return row[0]
+        cursor = conn.execute(
+            "INSERT INTO grades (course_id, assignment_name, score, points_possible, status) VALUES (?, ?, ?, ?, ?)",
+            (course_id, assignment_name, score, points_possible, status),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_grades_for_course(self, course_id: int) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM grades WHERE course_id = ? ORDER BY id", (course_id,)
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def get_all_grades_summary(self) -> list[dict]:
+        """Get overall grade per course."""
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("""
+            SELECT c.id, c.name, c.code,
+                   COUNT(g.id) as total_assignments,
+                   COUNT(CASE WHEN g.score IS NOT NULL AND g.score != '' THEN 1 END) as graded_assignments
+            FROM courses c
+            LEFT JOIN grades g ON g.course_id = c.id
+            GROUP BY c.id
+            ORDER BY c.name
+        """)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def update_course_grade(self, course_id: int, current_grade: str) -> None:
+        conn = self._get_conn()
+        conn.execute("UPDATE courses SET current_grade = ? WHERE id = ?", (current_grade, course_id))
         conn.commit()
