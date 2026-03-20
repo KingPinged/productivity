@@ -150,6 +150,26 @@ TOOLS = [
 ]
 
 
+def _to_12h(time_str: str) -> str:
+    """Convert HH:MM to 12h format."""
+    try:
+        h, m = time_str.split(":")
+        h = int(h)
+        ampm = "AM" if h < 12 else "PM"
+        if h == 0: h = 12
+        elif h > 12: h -= 12
+        return f"{h}:{m} {ampm}"
+    except Exception:
+        return time_str
+
+
+def _next_day(date_str: str) -> str:
+    """Get the next day as YYYY-MM-DD."""
+    from datetime import timedelta
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
+    return (dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def _execute_tool(tool_name: str, tool_input: dict, db: PlannerDB) -> str:
     """Execute a tool call and return the result as a string."""
     today = date_module.today().isoformat()
@@ -200,11 +220,20 @@ def _execute_tool(tool_name: str, tool_input: dict, db: PlannerDB) -> str:
     elif tool_name == "get_schedule":
         target = tool_input.get("date", today)
         blocks = db.get_schedule_blocks(target)
-        if not blocks:
-            return f"No schedule blocks for {target}."
+        # Also get calendar events for the date
+        events = db.get_events(start_after=target, end_before=_next_day(target))
+        if not blocks and not events:
+            return f"No schedule blocks or events for {target}."
         lines = [f"Schedule for {target}:"]
         for b in blocks:
-            lines.append(f"- {b['start_time']}-{b['end_time']}: {b['block_type']} ({b.get('ai_reason', '')})")
+            start_12 = _to_12h(b['start_time'])
+            end_12 = _to_12h(b['end_time'])
+            status_tag = f" [{b['status']}]" if b['status'] != 'scheduled' else ""
+            lines.append(f"- {start_12}-{end_12}: {b['block_type']} ({b.get('ai_reason', '')}){status_tag}")
+        if events:
+            lines.append("\nCalendar events:")
+            for e in events:
+                lines.append(f"- {e['title']}: {e['start_time']} to {e['end_time']} ({e.get('event_type', '')})")
         return "\n".join(lines)
 
     elif tool_name == "get_grades":
@@ -284,65 +313,52 @@ def _execute_tool(tool_name: str, tool_input: dict, db: PlannerDB) -> str:
 
 
 def _build_context_summary(db: PlannerDB) -> str:
-    """Build a compact context summary for the AI."""
+    """Build a lightweight context summary. Does NOT include schedule — AI must call get_schedule for fresh data."""
     today = date_module.today().isoformat()
-    context = ai_scheduler._context_builder.build(today)
 
     now = datetime.now()
     current_time = now.strftime("%I:%M %p")
-    parts = [f"Today is {context['day_of_week']}, {context['date']}. The current time is {current_time}."]
+    day_of_week = now.strftime("%A")
+    parts = [f"Today is {day_of_week}, {today}. The current time is {current_time}."]
+    parts.append("IMPORTANT: Use get_schedule tool to look up the actual current schedule. Do NOT guess or use stale data.")
 
-    # Schedule
-    blocks = db.get_schedule_blocks(today)
-    if blocks:
-        parts.append("\nCurrent schedule:")
-        for b in blocks:
-            parts.append(f"- {b['start_time']}-{b['end_time']}: {b['block_type']} ({b.get('ai_reason', '')})")
-
-    # Tasks (compact)
-    tasks = context.get("tasks", [])
-    if tasks:
-        parts.append(f"\n{len(tasks)} pending tasks. Nearest deadlines:")
-        for t in sorted(tasks, key=lambda x: x.get("deadline") or "9")[:5]:
-            line = f"- {t['title']}"
-            if t.get("course"): line += f" [{t['course']}]"
-            if t.get("deadline"): line += f" due {t['deadline']}"
-            parts.append(line)
-
-    # Grades
-    grades = context.get("course_grades", [])
-    if grades:
-        parts.append("\nGrades: " + ", ".join(f"{g['code'] or g['course']}: {g['current_grade']}" for g in grades))
+    # Grades (compact, stable data)
+    courses = db.get_courses()
+    if courses:
+        grade_strs = [f"{c.get('code') or c['name']}: {c.get('current_grade', 'N/A')}" for c in courses]
+        parts.append("\nGrades: " + ", ".join(grade_strs))
 
     # Recent context
-    user_ctx = context.get("user_context", [])
+    user_ctx = db.get_active_context()
     if user_ctx:
         parts.append("\nStudent recently said: " + "; ".join(f'"{c["message"]}"' for c in user_ctx[:5]))
 
-    # Memories
-    memories = context.get("memories", [])
+    # Memories (compact)
+    memories = db.get_memories(limit=10)
     if memories:
         parts.append("\nMemories: " + "; ".join(m["content"] for m in memories[:5]))
 
     return "\n".join(parts)
 
 
-SYSTEM = """You are a college student's AI scheduling assistant with access to tools. You can take ACTIONS, not just answer questions.
+SYSTEM = """You are a college student's AI scheduling assistant with tools. You take ACTIONS and answer questions.
 
-When the student tells you something (even if it's not a question), respond helpfully:
-- If they tell you about their day/state → use add_context + replan_schedule, then tell them what changed
-- If they want to add something → use add_task
-- If they finished something → use complete_task + replan_schedule
-- If they ask a question → use get_schedule, get_grades, or search_memory to look up info, then answer
-- If they share a preference or important fact → use save_memory
+CRITICAL RULES:
+1. NEVER output HTML. Only use markdown (headers, bold, bullets, etc).
+2. ALWAYS call get_schedule before answering questions about the schedule. NEVER guess schedule data from memory or context — always fetch fresh data.
+3. Use 12-hour time format (e.g., "2:00 PM" not "14:00").
+4. When the student asks about their schedule, events, or "what do I have", call get_schedule FIRST, then answer based on the tool result.
 
-ALWAYS respond with a friendly, concise message after using tools. Use markdown formatting.
-Examples of good responses after actions:
-- "Got it! I've noted that you're skipping office hours and replanned your afternoon. You now have a study block from 2-4pm for Probability I instead."
-- "Done! Added 'Study for midterm' to your tasks. I'll work it into tomorrow's schedule."
-- "I remember! Last week you mentioned struggling with proofs — I've been scheduling extra Probability I time because of that."
+When the student tells you something:
+- About their day/state → add_context + replan_schedule, tell them what changed
+- Add something → add_task or add_calendar_event
+- Finished something → complete_task + replan_schedule
+- Question about schedule/events → get_schedule (REQUIRED), then answer
+- Question about grades → get_grades (REQUIRED), then answer
+- Question about past events → search_memory, then answer
+- Preference or important fact → save_memory
 
-Be conversational, warm, and proactive. You're not just a tool — you're a helpful companion."""
+After using tools, respond with a friendly markdown-formatted message. Be concise and actionable."""
 
 
 @router.post("/chat")
