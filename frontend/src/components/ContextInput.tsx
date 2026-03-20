@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 interface ContextInputProps {
   onSubmit?: (message: string) => Promise<void>
   onReplan?: () => Promise<void>
+  onChatDone?: () => void
 }
 
 const SUGGESTIONS = [
@@ -19,7 +20,7 @@ function getToken(): string {
   return (window as any).__PLANNER_TOKEN__ || ''
 }
 
-export default function ContextInput(_props: ContextInputProps) {
+export default function ContextInput({ onChatDone }: ContextInputProps) {
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [streaming, setStreaming] = useState(false)
@@ -88,6 +89,8 @@ export default function ContextInput(_props: ContextInputProps) {
       }
 
       setStreaming(false)
+      // Refresh calendar/tasks/summary after AI may have made changes
+      onChatDone?.()
     } catch (err) {
       console.error('Failed:', err)
       setChatResponse('Something went wrong. Please try again.')

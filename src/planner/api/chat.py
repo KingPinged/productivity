@@ -194,7 +194,9 @@ def _build_context_summary(db: PlannerDB) -> str:
     today = date_module.today().isoformat()
     context = ai_scheduler._context_builder.build(today)
 
-    parts = [f"Today is {context['day_of_week']}, {context['date']}."]
+    now = datetime.now()
+    current_time = now.strftime("%I:%M %p")
+    parts = [f"Today is {context['day_of_week']}, {context['date']}. The current time is {current_time}."]
 
     # Schedule
     blocks = db.get_schedule_blocks(today)

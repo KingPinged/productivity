@@ -20,11 +20,18 @@ export default function App() {
   const { summary, email_alerts, tasks_today, tasks_later, reload: reloadSummary } = useSummary(today)
   const { triggerReplan } = useSchedule(today)
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<number>>(new Set())
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const handleReplan = useCallback(async () => {
     await triggerReplan()
     await reloadSummary()
   }, [triggerReplan, reloadSummary])
+
+  const handleChatDone = useCallback(() => {
+    // Increment key to force calendar/schedule/tasks to re-fetch
+    setRefreshKey(k => k + 1)
+    reloadSummary()
+  }, [reloadSummary])
 
   const activeAlerts = email_alerts.filter((_: any, i: number) => !dismissedAlerts.has(i))
 
@@ -39,7 +46,7 @@ export default function App() {
                 {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
               </h1>
               <p className="text-secondary text-sm mb-5">Plan your day, stay on track</p>
-              <ContextInput onSubmit={addMessage} onReplan={handleReplan} />
+              <ContextInput onSubmit={addMessage} onReplan={handleReplan} onChatDone={handleChatDone} />
               <DaySummary
                 summary={summary}
                 emailAlerts={activeAlerts}
@@ -50,7 +57,7 @@ export default function App() {
             </div>
             <div className="flex-1 min-h-0 px-8 pb-6">
               <div className="h-full bg-surface rounded-2xl shadow-soft border border-border overflow-hidden">
-                <CalendarView mode="day" />
+                <CalendarView mode="day" key={`day-${refreshKey}`} />
               </div>
             </div>
           </div>
@@ -59,7 +66,7 @@ export default function App() {
           <div className="h-full p-8">
             <h1 className="font-display font-bold text-2xl text-primary mb-6">Week Overview</h1>
             <div className="h-[calc(100%-3.5rem)] bg-surface rounded-2xl shadow-soft border border-border overflow-hidden">
-              <CalendarView mode="week" />
+              <CalendarView mode="week" key={`week-${refreshKey}`} />
             </div>
           </div>
         )}
@@ -72,7 +79,7 @@ export default function App() {
         {view === 'tasks' && (
           <div className="h-full p-8">
             <h1 className="font-display font-bold text-2xl text-primary mb-6">Tasks</h1>
-            <TasksView />
+            <TasksView key={`tasks-${refreshKey}`} />
           </div>
         )}
         {view === 'courses' && (
