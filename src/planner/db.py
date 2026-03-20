@@ -134,6 +134,15 @@ CREATE TABLE IF NOT EXISTS grades (
     status TEXT DEFAULT 'graded',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS ai_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,
+    content TEXT NOT NULL,
+    importance INTEGER DEFAULT 5,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
 """
 
 
@@ -693,3 +702,40 @@ class PlannerDB:
         conn = self._get_conn()
         conn.execute("UPDATE courses SET current_grade = ? WHERE id = ?", (current_grade, course_id))
         conn.commit()
+
+    # --- AI Memory ---
+
+    def add_memory(self, category: str, content: str, importance: int = 5, expires_at: str | None = None) -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "INSERT INTO ai_memory (category, content, importance, expires_at) VALUES (?, ?, ?, ?)",
+            (category, content, importance, expires_at),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_memories(self, category: str | None = None, limit: int = 50) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        query = "SELECT * FROM ai_memory WHERE (expires_at IS NULL OR expires_at > datetime('now'))"
+        params: list = []
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+        query += " ORDER BY importance DESC, created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = conn.execute(query, params)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def search_memories(self, query: str, limit: int = 10) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM ai_memory WHERE content LIKE ? ORDER BY importance DESC, created_at DESC LIMIT ?",
+            (f"%{query}%", limit),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
