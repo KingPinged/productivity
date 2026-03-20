@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { hasToken } from './api/client'
 import LoginPage from './components/LoginPage'
 import Sidebar from './components/Sidebar'
@@ -15,6 +15,27 @@ import { useSchedule } from './hooks/useSchedule'
 
 type View = 'today' | 'tasks' | 'week' | 'courses' | 'settings'
 
+async function subscribeToPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+  try {
+    const reg = await navigator.serviceWorker.ready
+    const { apiFetch } = await import('./api/client')
+    const vapidResp = await apiFetch<{ public_key: string }>('/api/push/vapid-key')
+    if (!vapidResp.public_key) return
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: vapidResp.public_key,
+    })
+    const subJson = sub.toJSON()
+    await apiFetch('/api/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }),
+    })
+  } catch (err) {
+    console.log('Push subscription failed:', err)
+  }
+}
+
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(hasToken())
   const [view, setView] = useState<View>('today')
@@ -26,6 +47,10 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [chatResponse, setChatResponse] = useState<string | null>(null)
   const [chatActions, setChatActions] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (loggedIn) { subscribeToPush() }
+  }, [loggedIn])
 
   const handleReplan = useCallback(async () => {
     await triggerReplan()
