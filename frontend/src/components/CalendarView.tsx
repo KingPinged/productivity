@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
@@ -42,9 +42,10 @@ function toFullCalendarEvent(event: CalendarEvent) {
 
 function blockToFullCalendar(block: ScheduleBlock) {
   const date = block.date
+  const label = block.ai_reason || block.block_type.charAt(0).toUpperCase() + block.block_type.slice(1)
   return {
     id: `block-${block.id}`,
-    title: `${block.block_type.charAt(0).toUpperCase() + block.block_type.slice(1)}${block.ai_reason ? `: ${block.ai_reason}` : ''}`,
+    title: label,
     start: `${date}T${block.start_time}:00`,
     end: `${date}T${block.end_time}:00`,
     backgroundColor: block.status === 'completed' ? '#F5F0EB' : (BLOCK_COLORS[block.block_type] || '#A8A29E'),
@@ -54,18 +55,48 @@ function blockToFullCalendar(block: ScheduleBlock) {
   }
 }
 
+function useWeekSchedule() {
+  const [blocks, setBlocks] = useState<ScheduleBlock[]>([])
+
+  const load = useCallback(async () => {
+    try {
+      const today = new Date()
+      const allBlocks: ScheduleBlock[] = []
+      // Fetch 7 days
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(today)
+        d.setDate(d.getDate() + i)
+        const dateStr = d.toISOString().split('T')[0]
+        const { apiFetch } = await import('../api/client')
+        const data = await apiFetch<{ blocks: ScheduleBlock[] }>(`/api/schedule/${dateStr}`)
+        allBlocks.push(...data.blocks)
+      }
+      setBlocks(allBlocks)
+    } catch (err) {
+      console.error('Failed to load week schedule:', err)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+  return { blocks, reload: load }
+}
+
 export default function CalendarView({ mode }: CalendarViewProps) {
   const initialView = mode === 'day' ? 'timeGridDay' : 'timeGridWeek'
   const today = new Date().toISOString().split('T')[0]
   const { events } = useEvents()
   const { schedule, updateBlock, triggerReplan } = useSchedule(today)
+  const weekSchedule = useWeekSchedule()
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
 
   const calendarEvents = useMemo(() => {
     const eventItems = events.map(toFullCalendarEvent)
-    const blockItems = (schedule?.blocks || []).map(blockToFullCalendar)
+    const scheduleBlocks = mode === 'week'
+      ? weekSchedule.blocks
+      : (schedule?.blocks || [])
+    const blockItems = scheduleBlocks.map(blockToFullCalendar)
     return [...eventItems, ...blockItems]
-  }, [events, schedule])
+  }, [events, schedule, weekSchedule.blocks, mode])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEventClick = useCallback((info: any) => {
@@ -122,6 +153,16 @@ export default function CalendarView({ mode }: CalendarViewProps) {
         events={calendarEvents}
         eventClick={handleEventClick}
         eventDrop={handleEventDrop}
+        slotLabelFormat={{
+          hour: 'numeric',
+          minute: '2-digit',
+          meridiem: 'short',
+        }}
+        eventTimeFormat={{
+          hour: 'numeric',
+          minute: '2-digit',
+          meridiem: 'short',
+        }}
       />
 
       {selectedBlock && (
