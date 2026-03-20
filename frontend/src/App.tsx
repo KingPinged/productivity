@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react'
+import { hasToken } from './api/client'
+import LoginPage from './components/LoginPage'
 import Sidebar from './components/Sidebar'
 import CalendarView from './components/CalendarView'
 import SettingsView from './components/SettingsView'
@@ -14,6 +16,7 @@ import { useSchedule } from './hooks/useSchedule'
 type View = 'today' | 'tasks' | 'week' | 'courses' | 'settings'
 
 export default function App() {
+  const [loggedIn, setLoggedIn] = useState(hasToken())
   const [view, setView] = useState<View>('today')
   const today = new Date().toISOString().split('T')[0]
   const { addMessage } = useUserContext()
@@ -36,6 +39,10 @@ export default function App() {
   }, [reloadSummary])
 
   const activeAlerts = email_alerts.filter((_: any, i: number) => !dismissedAlerts.has(i))
+
+  if (!loggedIn) {
+    return <LoginPage onLogin={() => setLoggedIn(true)} />
+  }
 
   return (
     <div className="flex h-screen bg-cream font-body">
