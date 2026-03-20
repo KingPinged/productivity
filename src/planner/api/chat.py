@@ -232,7 +232,7 @@ def _execute_tool(tool_name: str, tool_input: dict, db: PlannerDB) -> str:
         start = f"{target_date}T{tool_input['start_time']}:00"
         end = f"{target_date}T{tool_input['end_time']}:00"
         eid = db.upsert_event(
-            account_id=0,
+            account_id=None,
             source="manual",
             external_id=f"manual:{secrets.token_urlsafe(8)}",
             title=tool_input["title"],

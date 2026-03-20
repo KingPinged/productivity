@@ -307,7 +307,7 @@ class CanvasScraper:
             calendar_events = parser.parse_calendar_events(calendar_html)
             for evt in calendar_events:
                 self._db.upsert_event(
-                    account_id=0,
+                    account_id=None,
                     source="canvas",
                     external_id=f"canvas:cal:{evt['title'][:50]}:{evt.get('start_time', '')}",
                     title=evt["title"],
