@@ -1,5 +1,4 @@
 import json as json_module
-import secrets
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.planner.api.auth_middleware import create_token_dependency
 from src.planner.api.health import router as health_router
+from src.planner.api.login import router as login_router
 from src.planner.api import auth as auth_module
 from src.planner.api import preferences as prefs_module
 from src.planner.api import schedule as schedule_module
@@ -37,11 +37,7 @@ def create_app(
     static_dir: Path | None = None,
     google_client_config: dict | None = None,
 ) -> FastAPI:
-    if auth_token is None:
-        auth_token = secrets.token_urlsafe(32)
-
     app = FastAPI(title="Productivity Planner")
-    app.state.auth_token = auth_token
 
     app.add_middleware(
         CORSMiddleware,
@@ -50,6 +46,8 @@ def create_app(
         allow_headers=["*"],
     )
 
+    # If auth_token is provided (legacy test compat), pass it so static token also works.
+    # Otherwise, pure JWT validation.
     require_token = create_token_dependency(auth_token)
 
     if db_path is None:
@@ -79,6 +77,9 @@ def create_app(
         )
 
     app.dependency_overrides[auth_module.get_db] = get_db
+
+    # Login route (unauthenticated — returns JWT)
+    app.include_router(login_router)
 
     # Protected auth routes (bearer token required)
     for route in auth_module.router.routes:
@@ -173,7 +174,6 @@ def create_app(
         @app.get("/")
         def serve_index():
             html = index_path.read_text()
-            html = html.replace("__TOKEN_PLACEHOLDER__", auth_token)
             return HTMLResponse(html)
 
         app.mount("/", StaticFiles(directory=str(serve_dir), html=False), name="static")
@@ -186,11 +186,11 @@ def create_app(
     return app
 
 
-def run_server(db_path: str, auth_token: str, host: str = "127.0.0.1", port: int = 8321):
+def run_server(db_path: str = None, host: str = "127.0.0.1", port: int = 8321):
     """Entry point for subprocess launch."""
     import uvicorn
 
-    app = create_app(db_path=db_path, auth_token=auth_token)
+    app = create_app(db_path=db_path)
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
