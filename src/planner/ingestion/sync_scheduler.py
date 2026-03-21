@@ -54,15 +54,17 @@ class SyncScheduler:
         )
         logger.info("Morning schedule generation set for %s CT", wake_time)
 
-        # Also generate on startup (first run)
-        self._scheduler.add_job(
-            self._morning_generate,
-            "date",  # Run once, now
-            id="startup_generate",
-            replace_existing=True,
-        )
-
         self._scheduler.start()
+
+    def trigger_startup_generate(self):
+        """Call after AI scheduler is set to generate initial schedules."""
+        if self._ai_scheduler:
+            self._scheduler.add_job(
+                self._morning_generate,
+                "date",  # Run once, now
+                id="startup_generate",
+                replace_existing=True,
+            )
 
     def stop(self) -> None:
         if self._scheduler.running:

@@ -133,6 +133,8 @@ def create_app(
         chat_module.ai_scheduler = schedule_module.ai_scheduler
         # Connect AI scheduler to sync scheduler for auto-replanning
         scheduler.set_ai_scheduler(schedule_module.ai_scheduler)
+        # Generate initial week schedule on startup
+        scheduler.trigger_startup_generate()
 
     # Course routes
     app.dependency_overrides[courses_module.get_db] = get_db
