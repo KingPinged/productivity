@@ -1,5 +1,8 @@
 import json as json_module
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -169,14 +172,43 @@ def create_app(
         route.dependencies = [require_token]
     app.include_router(chat_module.router)
 
-    # Reminder service (check every 30 seconds)
+    # Reminder service
     notifier = Notifier()
     reminder_service = ReminderService(db, notifier)
+
+    # Check and fire due reminders every 30 seconds
     scheduler._scheduler.add_job(
         reminder_service.check_and_fire,
         "interval",
         seconds=30,
         id="check_reminders",
+        replace_existing=True,
+    )
+
+    # Generate reminders from schedule blocks (runs after schedule generation)
+    def generate_today_reminders():
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+        count = reminder_service.generate_reminders_for_date(today)
+        reminder_service.generate_deadline_reminders()
+        logger.info("Generated %d reminders for %s", count, today)
+
+    # Generate reminders on startup (delayed to let schedule generate first)
+    scheduler._scheduler.add_job(
+        generate_today_reminders,
+        "date",
+        id="startup_reminders",
+        replace_existing=True,
+        run_date=None,  # runs immediately but after other startup jobs
+    )
+
+    # Regenerate reminders every hour (picks up new schedule blocks)
+    scheduler._scheduler.add_job(
+        generate_today_reminders,
+        "interval",
+        hours=1,
+        id="hourly_reminders",
         replace_existing=True,
     )
 
