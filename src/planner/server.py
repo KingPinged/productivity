@@ -131,6 +131,8 @@ def create_app(
     if anthropic_key:
         schedule_module.ai_scheduler = AIScheduler(db, api_key=anthropic_key)
         chat_module.ai_scheduler = schedule_module.ai_scheduler
+        # Connect AI scheduler to sync scheduler for auto-replanning
+        scheduler.set_ai_scheduler(schedule_module.ai_scheduler)
 
     # Course routes
     app.dependency_overrides[courses_module.get_db] = get_db

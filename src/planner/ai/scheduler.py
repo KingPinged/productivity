@@ -121,6 +121,51 @@ class AIScheduler:
             logger.error("Replan failed: %s", e)
             return None
 
+    def generate_week(self) -> dict[str, int]:
+        """Generate schedules for the next 7 days. Returns dict of date -> block count."""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("America/Chicago"))
+        results = {}
+
+        for i in range(7):
+            day = now + timedelta(days=i)
+            date_str = day.strftime("%Y-%m-%d")
+            try:
+                result = self.replan(date_str)
+                if result:
+                    count = len(result.get("schedule", []))
+                    results[date_str] = count
+                    logger.info("Generated schedule for %s: %d blocks", date_str, count)
+                else:
+                    results[date_str] = 0
+            except Exception as e:
+                logger.error("Failed to generate %s: %s", date_str, e)
+                results[date_str] = -1
+
+        return results
+
+    def smart_replan(self) -> dict[str, int] | None:
+        """Replan today and tomorrow only (lightweight, triggered after data changes)."""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("America/Chicago"))
+        results = {}
+
+        for i in range(2):  # Today + tomorrow
+            day = now + timedelta(days=i)
+            date_str = day.strftime("%Y-%m-%d")
+            try:
+                result = self.replan(date_str)
+                if result:
+                    results[date_str] = len(result.get("schedule", []))
+            except Exception as e:
+                logger.error("Smart replan failed for %s: %s", date_str, e)
+
+        return results
+
     def _extract_and_store_memories(self, date: str, result: dict, user_context: list) -> None:
         """Store important scheduling decisions as memories."""
         # Store what was planned
