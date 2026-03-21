@@ -6,6 +6,8 @@
   html, body, #root {
     height: 100%;
     width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
     font-family: 'DM Sans', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -103,6 +105,34 @@
 
   .fc .fc-timegrid-now-indicator-arrow {
     border-color: #DC3B3B !important;
+  }
+
+  /* Mobile calendar overrides */
+  @media (max-width: 767px) {
+    .fc .fc-toolbar-title {
+      font-size: 0.9rem !important;
+    }
+    .fc .fc-button {
+      padding: 4px 8px !important;
+      font-size: 0.7rem !important;
+    }
+    .fc .fc-col-header-cell-cushion {
+      font-size: 0.65rem !important;
+      padding: 6px 2px !important;
+    }
+    .fc .fc-timegrid-slot-label-cushion {
+      font-size: 0.6rem !important;
+    }
+    .fc .fc-event {
+      font-size: 0.65rem !important;
+      padding: 1px 3px !important;
+    }
+    .fc .fc-toolbar {
+      margin-bottom: 0.5em !important;
+    }
+    .fc .fc-timegrid-slot {
+      height: 2em !important;
+    }
   }
 }
 

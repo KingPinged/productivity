@@ -78,14 +78,15 @@ export default function App() {
         <Sidebar currentView={view} onNavigate={setView} />
       </div>
 
-      <main className="flex-1 overflow-auto pb-20 md:pb-0">
+      <main className="flex-1 overflow-auto overflow-x-hidden pb-20 md:pb-0 min-w-0">
         {view === 'today' && (
           <div className="h-full flex flex-col">
-            <div className="px-4 md:px-8 pt-4 md:pt-6 pb-2">
-              <h1 className="font-display font-bold text-xl md:text-2xl text-primary mb-1">
-                {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            <div className="px-4 md:px-8 pt-3 md:pt-6 pb-1 md:pb-2">
+              <h1 className="font-display font-bold text-base md:text-2xl text-primary">
+                {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                <span className="hidden md:inline"> — {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
               </h1>
-              <p className="text-secondary text-sm mb-4 md:mb-5">Plan your day, stay on track</p>
+              <p className="text-secondary text-xs md:text-sm mb-2 md:mb-5 hidden md:block">Plan your day, stay on track</p>
               <ContextInput onSubmit={addMessage} onReplan={handleReplan} onChatDone={handleChatDone} chatResponse={chatResponse} setChatResponse={setChatResponse} chatActions={chatActions} setChatActions={setChatActions} />
               <DaySummary
                 summary={summary}

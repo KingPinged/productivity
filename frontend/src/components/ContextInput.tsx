@@ -124,13 +124,13 @@ export default function ContextInput({ onChatDone, chatResponse, setChatResponse
           ) : 'Send'}
         </button>
       </div>
-      <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible scrollbar-hide">
+      <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1 scrollbar-hide whitespace-nowrap">
         {SUGGESTIONS.map((s) => (
           <button
             key={s}
             onClick={() => handleSubmit(s)}
             disabled={sending}
-            className="px-2.5 py-1 bg-surface hover:bg-sand border border-border rounded-full text-xs text-secondary hover:text-primary transition-colors disabled:opacity-50"
+            className="flex-shrink-0 px-2.5 py-1 bg-surface hover:bg-sand border border-border rounded-full text-xs text-secondary hover:text-primary transition-colors disabled:opacity-50"
           >
             {s}
           </button>

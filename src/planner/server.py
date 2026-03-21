@@ -74,7 +74,7 @@ def create_app(
     if google_client_config:
         auth_module.auth_manager = GoogleAuthManager(
             client_config=google_client_config,
-            redirect_uri=f"http://localhost:8321/auth/callback",
+            redirect_uri=os.environ.get("OAUTH_REDIRECT_URI", "https://vultrproductivity.duckdns.org/auth/callback"),
         )
 
     app.dependency_overrides[auth_module.get_db] = get_db

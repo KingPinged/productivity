@@ -207,11 +207,11 @@ export default function CalendarView({ mode }: CalendarViewProps) {
       <FullCalendar
         plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
         initialView={initialView}
-        headerToolbar={{
-          left: 'prev,next today',
-          center: 'title',
-          right: 'timeGridDay,timeGridWeek',
-        }}
+        headerToolbar={
+          window.innerWidth < 768
+            ? { left: 'prev,next', center: 'title', right: 'today' }
+            : { left: 'prev,next today', center: 'title', right: 'timeGridDay,timeGridWeek' }
+        }
         editable={true}
         selectable={true}
         selectMirror={true}
