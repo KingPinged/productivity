@@ -177,6 +177,13 @@ class PlannerDB:
         except Exception:
             pass  # Column already exists
 
+        # Migration: add syllabus_file to courses if missing
+        try:
+            conn.execute("ALTER TABLE courses ADD COLUMN syllabus_file TEXT")
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -416,6 +423,7 @@ class PlannerDB:
         code: str | None = None,
         syllabus_url: str | None = None,
         syllabus_text: str | None = None,
+        syllabus_file: str | None = None,
         instructor: str | None = None,
         schedule_info: str | None = None,
         canvas_config_id: int | None = None,
@@ -429,18 +437,18 @@ class PlannerDB:
         if row:
             conn.execute(
                 """UPDATE courses SET name=?, code=?, syllabus_url=?, syllabus_text=?,
-                   instructor=?, schedule_info=?, canvas_config_id=?, updated_at=?
+                   syllabus_file=?, instructor=?, schedule_info=?, canvas_config_id=?, updated_at=?
                    WHERE id=?""",
-                (name, code, syllabus_url, syllabus_text, instructor,
+                (name, code, syllabus_url, syllabus_text, syllabus_file, instructor,
                  schedule_info, canvas_config_id, now, row[0]),
             )
             conn.commit()
             return row[0]
         cursor = conn.execute(
             """INSERT INTO courses (canvas_course_id, name, code, syllabus_url,
-               syllabus_text, instructor, schedule_info, canvas_config_id, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (canvas_course_id, name, code, syllabus_url, syllabus_text,
+               syllabus_text, syllabus_file, instructor, schedule_info, canvas_config_id, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (canvas_course_id, name, code, syllabus_url, syllabus_text, syllabus_file,
              instructor, schedule_info, canvas_config_id, now),
         )
         conn.commit()

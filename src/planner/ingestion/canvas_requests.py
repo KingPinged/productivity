@@ -143,6 +143,43 @@ class CanvasRequestsScraper:
 
         return syllabus_url, syllabus_text
 
+    def _download_syllabus(self, session, syllabus_url, course_id, api_url):
+        """Download syllabus file and save locally. Returns local filename or None."""
+        import os, re
+        save_dir = os.path.join(os.path.dirname(self._db.db_path), "syllabi")
+        os.makedirs(save_dir, exist_ok=True)
+
+        try:
+            # If it's a Canvas file viewer URL, get direct download via API
+            file_match = re.search(r'/files/(\d+)', syllabus_url)
+            if file_match and 'instructure.com' in syllabus_url:
+                fid = file_match.group(1)
+                r = session.get(f"{api_url}/files/{fid}", timeout=15)
+                if r.status_code == 200:
+                    direct_url = r.json().get("url")
+                    if direct_url:
+                        syllabus_url = direct_url
+
+            # Download the content
+            r = session.get(syllabus_url, timeout=30, allow_redirects=True)
+            if r.status_code != 200:
+                return None
+
+            ct = r.headers.get("content-type", "")
+            if "pdf" in ct or r.content[:5] == b"%PDF-":
+                fname = f"syllabus_{course_id}.pdf"
+                with open(os.path.join(save_dir, fname), "wb") as f:
+                    f.write(r.content)
+                return fname
+            elif "html" in ct:
+                fname = f"syllabus_{course_id}.html"
+                with open(os.path.join(save_dir, fname), "w", encoding="utf-8") as f:
+                    f.write(r.text)
+                return fname
+        except Exception as e:
+            logger.warning("Failed to download syllabus: %s", e)
+        return None
+
     def sync_config(self, config_id: int) -> int:
         config = self._db.get_canvas_config(config_id)
         if not config or config["status"] != "active":
@@ -191,10 +228,18 @@ class CanvasRequestsScraper:
             except Exception as e:
                 logger.warning("Failed syllabus for %s: %s", course_name, e)
 
+            # Download syllabus file locally
+            syllabus_file = None
+            if syllabus_url:
+                syllabus_file = self._download_syllabus(
+                    session, syllabus_url, course_id, api_url
+                )
+
             # Save course
             self._db.upsert_course(
                 canvas_course_id=course_id, name=course_name, code=course_code,
                 syllabus_url=syllabus_url, syllabus_text=syllabus_text,
+                syllabus_file=syllabus_file,
                 canvas_config_id=config_id,
             )
 
