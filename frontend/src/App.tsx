@@ -3,6 +3,7 @@ import { hasToken } from './api/client'
 import LoginPage from './components/LoginPage'
 import Sidebar from './components/Sidebar'
 import BottomNav from './components/BottomNav'
+import InstallPrompt from './components/InstallPrompt'
 import CalendarView from './components/CalendarView'
 import SettingsView from './components/SettingsView'
 import TasksView from './components/TasksView'
@@ -16,7 +17,7 @@ import { useSchedule } from './hooks/useSchedule'
 
 type View = 'today' | 'tasks' | 'week' | 'courses' | 'settings'
 
-async function subscribeToPush() {
+export async function subscribeToPush() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
   try {
     const reg = await navigator.serviceWorker.ready
@@ -132,6 +133,7 @@ export default function App() {
       <BottomNav currentView={view} onNavigate={setView} />
 
       <ReminderToast />
+      <InstallPrompt />
     </div>
   )
 }
