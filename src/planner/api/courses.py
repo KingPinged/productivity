@@ -30,7 +30,8 @@ def get_syllabus_file(course_id: int, db: PlannerDB = Depends(get_db)):
         return {"error": "File not found"}
 
     media_type = "application/pdf" if file_path.endswith(".pdf") else "text/html"
-    return FileResponse(file_path, media_type=media_type)
+    headers = {"X-Frame-Options": "SAMEORIGIN", "Content-Disposition": "inline"}
+    return FileResponse(file_path, media_type=media_type, headers=headers)
 
 
 @router.get("/courses/{course_id}")

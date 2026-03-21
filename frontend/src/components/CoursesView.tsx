@@ -253,16 +253,27 @@ function SyllabusPanel({ courseId, syllabusUrl, syllabusText, syllabusFile }: {
                 )}
               </div>
 
-              {/* Embedded syllabus from our server — no X-Frame-Options issues */}
+              {/* Embedded PDF viewer from our server */}
               {embedUrl ? (
-                <iframe
-                  src={embedUrl}
-                  className="w-full border-0"
+                <object
+                  data={embedUrl}
+                  type="application/pdf"
+                  className="w-full"
                   style={{ height: '70vh', minHeight: '400px' }}
-                  title="Syllabus"
-                />
+                >
+                  <div className="p-6 flex flex-col items-center gap-3">
+                    <p className="text-secondary text-sm">PDF viewer not supported in this browser</p>
+                    <a
+                      href={embedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-5 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-xl transition-colors"
+                    >
+                      Open PDF {'\u2197'}
+                    </a>
+                  </div>
+                </object>
               ) : syllabusUrl ? (
-                /* External link card for URLs we couldn't download */
                 <div className="p-6 flex flex-col items-center gap-3">
                   <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center text-accent text-xl">
                     {'\u{1F4C4}'}
@@ -278,7 +289,6 @@ function SyllabusPanel({ courseId, syllabusUrl, syllabusText, syllabusFile }: {
                   </a>
                 </div>
               ) : cleanText && cleanText.length > 10 ? (
-                /* Raw text from Canvas syllabus body */
                 <div className="p-4 text-sm text-primary leading-relaxed whitespace-pre-wrap max-h-[40vh] overflow-y-auto">
                   {cleanText}
                 </div>
