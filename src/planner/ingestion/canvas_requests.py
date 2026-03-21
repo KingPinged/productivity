@@ -52,6 +52,97 @@ class CanvasRequestsScraper:
                 break  # Safety limit
         return all_items
 
+    def _find_syllabus(self, session, api_url, canvas_url, course_id):
+        """Search multiple locations for a course syllabus. Returns (url, text)."""
+        syllabus_url = None
+        syllabus_text = None
+
+        # 1. Check syllabus_body from course API (most common)
+        try:
+            resp = session.get(
+                f"{api_url}/courses/{course_id}",
+                params={"include[]": "syllabus_body"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                body = resp.json().get("syllabus_body", "") or ""
+                if body.strip():
+                    syllabus_text = body
+                    # Extract external links from HTML
+                    links = re.findall(r'href="([^"]+)"', body)
+                    for link in links:
+                        if link.startswith("http"):
+                            syllabus_url = link
+                            break
+                    # If text is just a link, use it
+                    if not syllabus_url:
+                        import html as html_mod
+                        text = re.sub(r'<[^>]+>', '', html_mod.unescape(body)).strip()
+                        if text.startswith("http"):
+                            syllabus_url = text.split()[0]
+                        syllabus_text = text
+        except Exception as e:
+            logger.debug("Syllabus body check failed: %s", e)
+
+        # 2. Search files for syllabus PDFs
+        if not syllabus_url:
+            try:
+                resp = session.get(
+                    f"{api_url}/courses/{course_id}/files",
+                    params={"search_term": "syllabus", "per_page": "10"},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    files = resp.json()
+                    for f in files:
+                        name = f.get("display_name", "").lower()
+                        if "syllabus" in name:
+                            syllabus_url = f.get("url", "")
+                            if not syllabus_text:
+                                syllabus_text = f.get("display_name", "")
+                            break
+            except Exception as e:
+                logger.debug("Syllabus files check failed: %s", e)
+
+        # 3. Search files for schedule PDFs (some courses call it "schedule" not "syllabus")
+        if not syllabus_url:
+            try:
+                resp = session.get(
+                    f"{api_url}/courses/{course_id}/files",
+                    params={"search_term": "schedule", "per_page": "10"},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    files = resp.json()
+                    for f in files:
+                        name = f.get("display_name", "").lower()
+                        if "schedule" in name or "outline" in name:
+                            syllabus_url = f.get("url", "")
+                            if not syllabus_text:
+                                syllabus_text = f.get("display_name", "")
+                            break
+            except Exception as e:
+                logger.debug("Schedule files check failed: %s", e)
+
+        # 4. Check front page / home page for syllabus links
+        if not syllabus_url:
+            try:
+                resp = session.get(
+                    f"{api_url}/courses/{course_id}/front_page",
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    body = resp.json().get("body", "") or ""
+                    links = re.findall(r'href="([^"]+)"', body)
+                    for link in links:
+                        if "syllabus" in link.lower():
+                            syllabus_url = link
+                            break
+            except Exception as e:
+                logger.debug("Front page check failed: %s", e)
+
+        return syllabus_url, syllabus_text
+
     def sync_config(self, config_id: int) -> int:
         config = self._db.get_canvas_config(config_id)
         if not config or config["status"] != "active":
@@ -90,9 +181,20 @@ class CanvasRequestsScraper:
             code_match = re.search(r'-\s*(.+?)(?:\s*\(\d+\))?$', course_name)
             course_code = code_match.group(1).strip() if code_match else course_name
 
+            # Find syllabus
+            syllabus_url = None
+            syllabus_text = None
+            try:
+                syllabus_url, syllabus_text = self._find_syllabus(
+                    session, api_url, canvas_url, course_id
+                )
+            except Exception as e:
+                logger.warning("Failed syllabus for %s: %s", course_name, e)
+
             # Save course
             self._db.upsert_course(
                 canvas_course_id=course_id, name=course_name, code=course_code,
+                syllabus_url=syllabus_url, syllabus_text=syllabus_text,
                 canvas_config_id=config_id,
             )
 
