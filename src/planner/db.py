@@ -215,11 +215,24 @@ class PlannerDB:
 
     def add_account(self, email: str, provider: str = "google", scopes: str = "") -> int:
         conn = self._get_conn()
+        # Check for existing active account
         cursor = conn.execute(
             "SELECT id FROM accounts WHERE email = ? AND deleted_at IS NULL", (email,)
         )
         row = cursor.fetchone()
         if row:
+            return row[0]
+        # Check for soft-deleted account — reactivate it
+        cursor = conn.execute(
+            "SELECT id FROM accounts WHERE email = ?", (email,)
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                "UPDATE accounts SET deleted_at = NULL, scopes = ? WHERE id = ?",
+                (scopes, row[0]),
+            )
+            conn.commit()
             return row[0]
         cursor = conn.execute(
             "INSERT INTO accounts (email, provider, scopes) VALUES (?, ?, ?)",
