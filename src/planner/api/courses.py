@@ -5,6 +5,9 @@ from src.planner.db import PlannerDB
 
 router = APIRouter(prefix="/api")
 
+# Separate router for syllabus files — no auth needed (served to iframes)
+public_router = APIRouter(prefix="/api")
+
 def get_db():
     raise NotImplementedError("Override via app.dependency_overrides")
 
@@ -13,7 +16,7 @@ def list_courses(db: PlannerDB = Depends(get_db)):
     """List all courses with syllabus info."""
     return db.get_courses()
 
-@router.get("/courses/{course_id}/syllabus-file")
+@public_router.get("/courses/{course_id}/syllabus-file")
 def get_syllabus_file(course_id: int, db: PlannerDB = Depends(get_db)):
     """Serve the locally stored syllabus file."""
     course = db.get_course(course_id)

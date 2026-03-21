@@ -137,6 +137,8 @@ def create_app(
     for route in courses_module.router.routes:
         route.dependencies = [require_token]
     app.include_router(courses_module.router)
+    # Syllabus files served without auth (iframes can't send JWT)
+    app.include_router(courses_module.public_router)
 
     # Task routes
     app.dependency_overrides[tasks_module.get_db] = get_db
