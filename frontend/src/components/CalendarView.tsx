@@ -5,7 +5,9 @@ import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import { useEvents } from '../hooks/useEvents'
 import { useSchedule } from '../hooks/useSchedule'
+import { apiFetch } from '../api/client'
 import BlockDetail from './BlockDetail'
+import EventModal from './EventModal'
 import type { CalendarEvent, ScheduleBlock } from '../types'
 
 interface CalendarViewProps {
@@ -52,6 +54,7 @@ function blockToFullCalendar(block: ScheduleBlock) {
     borderColor: block.status === 'completed' ? '#E7E5E4' : (BLOCK_COLORS[block.block_type] || '#A8A29E'),
     textColor: block.status === 'completed' ? '#A8A29E' : '#ffffff',
     extendedProps: { type: 'block', block },
+    editable: true,
   }
 }
 
@@ -62,7 +65,6 @@ function useWeekSchedule() {
     try {
       const today = new Date()
       const allBlocks: ScheduleBlock[] = []
-      // Fetch 7 days
       for (let i = 0; i < 7; i++) {
         const d = new Date(today)
         d.setDate(d.getDate() + i)
@@ -84,10 +86,16 @@ function useWeekSchedule() {
 export default function CalendarView({ mode }: CalendarViewProps) {
   const initialView = mode === 'day' ? 'timeGridDay' : 'timeGridWeek'
   const today = new Date().toISOString().split('T')[0]
-  const { events } = useEvents()
+  const { events, reload: reloadEvents } = useEvents()
   const { schedule, updateBlock, triggerReplan } = useSchedule(today)
   const weekSchedule = useWeekSchedule()
   const [selectedBlock, setSelectedBlock] = useState<ScheduleBlock | null>(null)
+  const [eventModal, setEventModal] = useState<{
+    mode: 'create' | 'edit'
+    event?: CalendarEvent
+    defaultStart?: string
+    defaultEnd?: string
+  } | null>(null)
 
   const calendarEvents = useMemo(() => {
     const eventItems = events.map(toFullCalendarEvent)
@@ -98,31 +106,87 @@ export default function CalendarView({ mode }: CalendarViewProps) {
     return [...eventItems, ...blockItems]
   }, [events, schedule, weekSchedule.blocks, mode])
 
+  // Click/drag empty slot to create a new event
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleSelect = useCallback((info: any) => {
+    setEventModal({
+      mode: 'create',
+      defaultStart: info.startStr,
+      defaultEnd: info.endStr,
+    })
+  }, [])
+
+  // Click existing event — events open EventModal, blocks open BlockDetail
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEventClick = useCallback((info: any) => {
     const props = info.event.extendedProps
     if (props.type === 'block' && props.block) {
       setSelectedBlock(props.block as ScheduleBlock)
+    } else if (props.type === 'event') {
+      const eventId = parseInt(info.event.id.replace('event-', ''))
+      const originalEvent = events.find((e: CalendarEvent) => e.id === eventId)
+      if (originalEvent) {
+        setEventModal({ mode: 'edit', event: originalEvent })
+      }
     }
-  }, [])
+  }, [events])
 
+  // Drag-drop to move events or blocks
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEventDrop = useCallback(async (info: any) => {
     const props = info.event.extendedProps
-    if (props.type !== 'block' || !props.block) {
-      info.revert()
-      return
+    if (props.type === 'event') {
+      const eventId = parseInt(info.event.id.replace('event-', ''))
+      try {
+        await apiFetch(`/api/events/${eventId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            start_time: info.event.startStr,
+            end_time: info.event.endStr,
+          }),
+        })
+        reloadEvents()
+      } catch {
+        info.revert()
+      }
+    } else if (props.type === 'block' && props.block) {
+      const block = props.block as ScheduleBlock
+      try {
+        const newStart = info.event.start?.toTimeString().slice(0, 5) || block.start_time
+        const newEnd = info.event.end?.toTimeString().slice(0, 5) || block.end_time
+        await updateBlock(block.id, { start_time: newStart, end_time: newEnd })
+        await triggerReplan()
+      } catch {
+        info.revert()
+      }
     }
-    const block = props.block as ScheduleBlock
-    try {
-      const newStart = info.event.start?.toTimeString().slice(0, 5) || block.start_time
-      const newEnd = info.event.end?.toTimeString().slice(0, 5) || block.end_time
-      await updateBlock(block.id, { start_time: newStart, end_time: newEnd })
-      await triggerReplan()
-    } catch {
-      info.revert()
+  }, [updateBlock, triggerReplan, reloadEvents])
+
+  // Drag bottom edge to resize (change end time)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleEventResize = useCallback(async (info: any) => {
+    const props = info.event.extendedProps
+    if (props.type === 'event') {
+      const eventId = parseInt(info.event.id.replace('event-', ''))
+      try {
+        await apiFetch(`/api/events/${eventId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ end_time: info.event.endStr }),
+        })
+        reloadEvents()
+      } catch {
+        info.revert()
+      }
+    } else if (props.type === 'block' && props.block) {
+      const block = props.block as ScheduleBlock
+      try {
+        const newEnd = info.event.end?.toTimeString().slice(0, 5) || block.end_time
+        await updateBlock(block.id, { end_time: newEnd })
+      } catch {
+        info.revert()
+      }
     }
-  }, [updateBlock, triggerReplan])
+  }, [updateBlock, reloadEvents])
 
   const handleComplete = useCallback(async (blockId: number) => {
     await updateBlock(blockId, { status: 'completed' })
@@ -134,6 +198,10 @@ export default function CalendarView({ mode }: CalendarViewProps) {
     setSelectedBlock(null)
   }, [updateBlock])
 
+  const handleEventSaved = useCallback(() => {
+    reloadEvents()
+  }, [reloadEvents])
+
   return (
     <div className="h-full">
       <FullCalendar
@@ -144,15 +212,21 @@ export default function CalendarView({ mode }: CalendarViewProps) {
           center: 'title',
           right: 'timeGridDay,timeGridWeek',
         }}
-        editable={mode === 'day'}
-        selectable={mode === 'day'}
+        editable={true}
+        selectable={true}
+        selectMirror={true}
+        eventResizableFromStart={false}
         nowIndicator={true}
         slotMinTime="06:00:00"
         slotMaxTime="24:00:00"
         height="100%"
         events={calendarEvents}
+        select={handleSelect}
         eventClick={handleEventClick}
         eventDrop={handleEventDrop}
+        eventResize={handleEventResize}
+        longPressDelay={200}
+        selectLongPressDelay={300}
         slotLabelFormat={{
           hour: 'numeric',
           minute: '2-digit',
@@ -171,6 +245,17 @@ export default function CalendarView({ mode }: CalendarViewProps) {
           onClose={() => setSelectedBlock(null)}
           onComplete={handleComplete}
           onSkip={handleSkip}
+        />
+      )}
+
+      {eventModal && (
+        <EventModal
+          mode={eventModal.mode}
+          event={eventModal.event}
+          defaultStart={eventModal.defaultStart}
+          defaultEnd={eventModal.defaultEnd}
+          onClose={() => setEventModal(null)}
+          onSaved={handleEventSaved}
         />
       )}
     </div>
