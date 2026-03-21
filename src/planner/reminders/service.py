@@ -1,10 +1,13 @@
 import logging
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from src.planner.db import PlannerDB
 from src.planner.reminders.notifier import Notifier
 
 logger = logging.getLogger(__name__)
+
+CT = ZoneInfo("America/Chicago")
 
 REMINDER_TITLES = {
     "event": "Upcoming Event",
@@ -14,6 +17,31 @@ REMINDER_TITLES = {
     "nudge": "Still Working?",
     "summary": "Daily Summary",
 }
+
+
+def _to_12h(time_str: str) -> str:
+    """Convert HH:MM to 12h format."""
+    try:
+        h, m = time_str.split(":")
+        h = int(h)
+        ampm = "AM" if h < 12 else "PM"
+        if h == 0: h = 12
+        elif h > 12: h -= 12
+        return f"{h}:{m} {ampm}"
+    except Exception:
+        return time_str
+
+
+def _ct_timestamp(date: str, time_str: str) -> str:
+    """Create a Central Time ISO timestamp from date + HH:MM.
+    Returns UTC ISO string for correct comparison."""
+    try:
+        dt = datetime.strptime(f"{date}T{time_str}:00", "%Y-%m-%dT%H:%M:%S")
+        ct_dt = dt.replace(tzinfo=CT)
+        utc_dt = ct_dt.astimezone(timezone.utc)
+        return utc_dt.isoformat()
+    except Exception:
+        return f"{date}T{time_str}:00Z"
 
 
 class ReminderService:
@@ -27,19 +55,30 @@ class ReminderService:
         """Generate reminders from schedule blocks and events for a given date. Returns count."""
         self._db.clear_reminders_for_date(date)
         blocks = self._db.get_schedule_blocks(date)
+        now = datetime.now(timezone.utc)
         count = 0
 
         for block in blocks:
             if block["status"] in ("completed", "skipped", "rescheduled"):
                 continue
 
-            remind_at = f"{date}T{block['start_time']}:00Z"
+            # Convert block time to proper UTC timestamp (blocks are in Central Time)
+            remind_at = _ct_timestamp(date, block["start_time"])
+            start_12 = _to_12h(block["start_time"])
+            end_12 = _to_12h(block["end_time"])
+
+            # Skip if already past
+            try:
+                if datetime.fromisoformat(remind_at) < now:
+                    continue
+            except Exception:
+                pass
 
             if block["block_type"] == "rest":
                 self._db.add_reminder(
                     remind_at=remind_at,
                     reminder_type="break",
-                    message=f"Take a break ({block['start_time']} — {block['end_time']})",
+                    message=f"Take a break ({start_12} - {end_12})",
                     schedule_block_id=block["id"],
                 )
             else:
@@ -47,12 +86,29 @@ class ReminderService:
                 self._db.add_reminder(
                     remind_at=remind_at,
                     reminder_type="task_start",
-                    message=f"Time to start: {reason}",
+                    message=f"{reason} ({start_12} - {end_12})",
                     schedule_block_id=block["id"],
                 )
+
+                # 10-minute advance reminder for important blocks (study, meeting)
+                if block["block_type"] in ("study", "meeting"):
+                    try:
+                        block_time = datetime.fromisoformat(remind_at)
+                        warn_10 = block_time - timedelta(minutes=10)
+                        if warn_10 > now:
+                            self._db.add_reminder(
+                                remind_at=warn_10.isoformat(),
+                                reminder_type="event",
+                                message=f"Starting in 10 min: {reason}",
+                                schedule_block_id=block["id"],
+                            )
+                            count += 1
+                    except Exception:
+                        pass
+
             count += 1
 
-        # Generate "upcoming event" reminders (30 min + 5 min before)
+        # Generate reminders for calendar events
         next_day = self._date_offset(date, 1)
         events = self._db.get_events(start_after=date, end_before=next_day)
         for event in events:
@@ -60,26 +116,30 @@ class ReminderService:
                 continue
             try:
                 evt_time = datetime.fromisoformat(event["start_time"].replace("Z", "+00:00"))
+                if evt_time.tzinfo is None:
+                    evt_time = evt_time.replace(tzinfo=CT).astimezone(timezone.utc)
+
+                # 10 min before (important events)
+                warn_10 = evt_time - timedelta(minutes=10)
+                if warn_10 > now:
+                    self._db.add_reminder(
+                        remind_at=warn_10.isoformat(),
+                        reminder_type="event",
+                        message=f"{event['title']} in 10 minutes",
+                        urgent=True,
+                    )
+                    count += 1
+
                 # 30 min before
                 warn_30 = evt_time - timedelta(minutes=30)
-                if warn_30 > datetime.now(timezone.utc):
+                if warn_30 > now:
                     self._db.add_reminder(
                         remind_at=warn_30.isoformat(),
                         reminder_type="event",
                         message=f"{event['title']} in 30 minutes",
                     )
                     count += 1
-                # 5 min before
-                warn_5 = evt_time - timedelta(minutes=5)
-                if warn_5 > datetime.now(timezone.utc):
-                    self._db.add_reminder(
-                        remind_at=warn_5.isoformat(),
-                        reminder_type="event",
-                        message=f"{event['title']} in 5 minutes",
-                        urgent=True,
-                    )
-                    count += 1
-            except ValueError:
+            except (ValueError, TypeError):
                 continue
 
         return count
@@ -89,8 +149,9 @@ class ReminderService:
         return (dt + timedelta(days=days)).strftime("%Y-%m-%d")
 
     def generate_deadline_reminders(self) -> int:
-        """Generate deadline warning reminders for pending tasks. Returns count."""
+        """Generate deadline warning reminders for pending tasks."""
         tasks = self._db.get_tasks(status="pending")
+        now = datetime.now(timezone.utc)
         count = 0
 
         for task in tasks:
@@ -98,11 +159,12 @@ class ReminderService:
                 continue
 
             try:
-                deadline = datetime.fromisoformat(task["deadline"].replace("Z", "+00:00"))
-            except ValueError:
+                deadline_str = task["deadline"].replace("Z", "+00:00")
+                deadline = datetime.fromisoformat(deadline_str)
+                if deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=CT).astimezone(timezone.utc)
+            except (ValueError, TypeError):
                 continue
-
-            now = datetime.now(timezone.utc)
 
             # 24h before deadline
             warn_24h = deadline - timedelta(hours=24)
@@ -128,6 +190,18 @@ class ReminderService:
                 )
                 count += 1
 
+            # 1h before deadline
+            warn_1h = deadline - timedelta(hours=1)
+            if warn_1h > now:
+                self._db.add_reminder(
+                    remind_at=warn_1h.isoformat(),
+                    reminder_type="deadline",
+                    message=f"URGENT: {task['title']} due in 1 hour!",
+                    task_id=task["id"],
+                    urgent=True,
+                )
+                count += 1
+
         return count
 
     def check_and_fire(self, current_time: str | None = None) -> int:
@@ -141,7 +215,7 @@ class ReminderService:
         for reminder in due:
             if self._is_quiet_hours(reminder):
                 if not reminder["urgent"]:
-                    continue  # Suppress non-urgent during quiet hours
+                    continue
 
             title = REMINDER_TITLES.get(reminder["reminder_type"], "Reminder")
             self._notifier.send(
@@ -156,29 +230,21 @@ class ReminderService:
 
             self._db.mark_reminder_fired(reminder["id"])
             fired += 1
+            logger.info("Fired reminder: [%s] %s", reminder["reminder_type"], reminder["message"][:50])
 
         return fired
 
     def _is_quiet_hours(self, reminder: dict) -> bool:
-        """Check if current time falls within quiet hours."""
+        """Check if current time in CT falls within quiet hours."""
         start = self._db.get_preference("quiet_hours_start")
         end = self._db.get_preference("quiet_hours_end")
         if not start or not end:
             return False
 
-        try:
-            remind_time = reminder["remind_at"]
-            # Extract HH:MM from ISO timestamp
-            if "T" in remind_time:
-                time_part = remind_time.split("T")[1][:5]
-            else:
-                return False
+        now_ct = datetime.now(CT)
+        current_hhmm = now_ct.strftime("%H:%M")
 
-            # Simple string comparison works for HH:MM format
-            if start > end:
-                # Quiet hours span midnight (e.g., 23:00 to 07:00)
-                return time_part >= start or time_part < end
-            else:
-                return start <= time_part < end
-        except (IndexError, ValueError):
-            return False
+        if start > end:
+            return current_hhmm >= start or current_hhmm < end
+        else:
+            return start <= current_hhmm < end
