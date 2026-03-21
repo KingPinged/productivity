@@ -232,32 +232,39 @@ function SyllabusPanel({ syllabusUrl, syllabusText }: { syllabusUrl: string | nu
                 </div>
               )}
 
-              {/* Embedded viewer */}
-              {syllabusUrl && (
+              {/* Syllabus content */}
+              {syllabusUrl && isPdf && (
                 <div className="relative">
-                  {isPdf || isCanvasFile ? (
-                    <iframe
-                      src={syllabusUrl.replace('?wrap=1', '') + (syllabusUrl.includes('?') ? '&' : '?') + 'preview=1'}
-                      className="w-full border-0"
-                      style={{ height: '70vh', minHeight: '400px' }}
-                      title="Syllabus"
-                      sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                    />
-                  ) : (
-                    <iframe
-                      src={syllabusUrl}
-                      className="w-full border-0"
-                      style={{ height: '70vh', minHeight: '400px' }}
-                      title="Syllabus"
-                      sandbox="allow-same-origin allow-scripts allow-popups"
-                    />
-                  )}
+                  <iframe
+                    src={`https://docs.google.com/gview?url=${encodeURIComponent(syllabusUrl)}&embedded=true`}
+                    className="w-full border-0"
+                    style={{ height: '70vh', minHeight: '400px' }}
+                    title="Syllabus PDF"
+                  />
                 </div>
               )}
 
-              {/* Fallback text content if no URL or iframe fails */}
-              {!syllabusUrl && cleanText && (
-                <div className="p-4 text-sm text-primary leading-relaxed whitespace-pre-wrap max-h-[60vh] overflow-y-auto">
+              {/* For non-PDF links, show a styled link card instead of iframe */}
+              {syllabusUrl && !isPdf && (
+                <div className="p-6 flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center text-accent text-xl">
+                    {'\u{1F4C4}'}
+                  </div>
+                  <p className="text-primary text-sm font-medium text-center">Syllabus is hosted externally</p>
+                  <a
+                    href={syllabusUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-5 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-xl transition-colors"
+                  >
+                    Open Syllabus {'\u2197'}
+                  </a>
+                </div>
+              )}
+
+              {/* Text content from Canvas syllabus body */}
+              {cleanText && cleanText.length > 10 && (
+                <div className="p-4 text-sm text-primary leading-relaxed whitespace-pre-wrap max-h-[40vh] overflow-y-auto border-t border-border/50">
                   {cleanText}
                 </div>
               )}
