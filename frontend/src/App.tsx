@@ -80,7 +80,7 @@ export default function App() {
 
       <main className="flex-1 overflow-auto overflow-x-hidden pb-20 md:pb-0 min-w-0">
         {view === 'today' && (
-          <div className="h-full flex flex-col">
+          <div>
             <div className="px-4 md:px-8 pt-3 md:pt-6 pb-1 md:pb-2">
               <h1 className="font-display font-bold text-base md:text-2xl text-primary">
                 {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
@@ -96,8 +96,8 @@ export default function App() {
                 onDismissAlert={(i: number) => setDismissedAlerts(prev => new Set(prev).add(i))}
               />
             </div>
-            <div className="flex-1 min-h-0 px-4 md:px-8 pb-4 md:pb-6">
-              <div className="h-full bg-surface rounded-2xl shadow-soft border border-border overflow-hidden">
+            <div className="px-4 md:px-8 pb-4 md:pb-6">
+              <div className="bg-surface rounded-2xl shadow-soft border border-border overflow-hidden" style={{ height: '800px' }}>
                 <CalendarView mode="day" key={`day-${refreshKey}`} />
               </div>
             </div>

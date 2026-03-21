@@ -135,7 +135,6 @@ export default function EventModal({ mode, event, defaultStart, defaultEnd, onCl
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Event name"
-              autoFocus
               className="w-full bg-cream border border-border rounded-xl px-3 py-2.5 text-primary text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none"
             />
           </div>
