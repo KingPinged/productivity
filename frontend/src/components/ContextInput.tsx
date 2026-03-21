@@ -21,7 +21,7 @@ const SUGGESTIONS = [
 ]
 
 function getToken(): string {
-  return (window as any).__PLANNER_TOKEN__ || ''
+  return localStorage.getItem('planner_token') || ''
 }
 
 export default function ContextInput({ onChatDone, chatResponse, setChatResponse, chatActions: actions, setChatActions: setActions }: ContextInputProps) {
