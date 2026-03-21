@@ -21,11 +21,10 @@ def list_configs(db: PlannerDB = Depends(get_db)):
 
 @router.post("/setup")
 def setup_canvas(canvas_url: str, db: PlannerDB = Depends(get_db)):
-    if canvas_scraper is None:
-        return {"error": "Canvas scraper not initialized"}
-    config_id = canvas_scraper.launch_login(canvas_url)
-    if config_id is None:
-        return {"error": "Login timed out or failed"}
+    """Register a Canvas URL. Paste cookies separately to authenticate."""
+    # Just register the URL with a placeholder — cookies will be pasted later
+    config_id = db.add_canvas_config(canvas_url.strip(), "pending")
+    db.update_canvas_status(config_id, "expired")  # Mark as needing cookies
     return {"status": "ok", "config_id": config_id}
 
 @router.post("/relogin/{config_id}")
