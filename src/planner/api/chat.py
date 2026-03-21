@@ -172,7 +172,7 @@ def _next_day(date_str: str) -> str:
 
 def _execute_tool(tool_name: str, tool_input: dict, db: PlannerDB) -> str:
     """Execute a tool call and return the result as a string."""
-    today = date_module.today().isoformat()
+    today = _get_central_time().strftime("%Y-%m-%d")
 
     if tool_name == "add_context":
         db.add_user_context(tool_input["message"])
@@ -312,14 +312,19 @@ def _execute_tool(tool_name: str, tool_input: dict, db: PlannerDB) -> str:
     return f"Unknown tool: {tool_name}"
 
 
+def _get_central_time():
+    """Get current time in US Central timezone."""
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/Chicago"))
+
+
 def _build_context_summary(db: PlannerDB) -> str:
     """Build a lightweight context summary. Does NOT include schedule — AI must call get_schedule for fresh data."""
-    today = date_module.today().isoformat()
-
-    now = datetime.now()
+    now = _get_central_time()
+    today = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%I:%M %p")
     day_of_week = now.strftime("%A")
-    parts = [f"Today is {day_of_week}, {today}. The current time is {current_time}."]
+    parts = [f"Today is {day_of_week}, {today}. The current time is {current_time} Central Time."]
     parts.append("IMPORTANT: Use get_schedule tool to look up the actual current schedule. Do NOT guess or use stale data.")
 
     # Grades (compact, stable data)
@@ -341,13 +346,16 @@ def _build_context_summary(db: PlannerDB) -> str:
     return "\n".join(parts)
 
 
+CHAT_MODEL = "claude-haiku-4-5-20251001"  # Fast model for chat, Sonnet for scheduling
+
 SYSTEM = """You are a college student's AI scheduling assistant with tools. You take ACTIONS and answer questions.
 
 CRITICAL RULES:
 1. NEVER output HTML. Only use markdown (headers, bold, bullets, etc).
 2. ALWAYS call get_schedule before answering questions about the schedule. NEVER guess schedule data from memory or context — always fetch fresh data.
 3. Use 12-hour time format (e.g., "2:00 PM" not "14:00").
-4. When the student asks about their schedule, events, or "what do I have", call get_schedule FIRST, then answer based on the tool result.
+4. The student is in US Central Time (CT). All times you mention should be in Central Time.
+5. When the student asks about their schedule, events, or "what do I have", call get_schedule FIRST, then answer based on the tool result.
 
 When the student tells you something:
 - About their day/state → add_context + replan_schedule, tell them what changed
@@ -358,7 +366,7 @@ When the student tells you something:
 - Question about past events → search_memory, then answer
 - Preference or important fact → save_memory
 
-After using tools, respond with a friendly markdown-formatted message. Be concise and actionable."""
+After using tools, respond with a friendly markdown-formatted message. Be concise and actionable. Keep responses SHORT — 2-4 sentences for simple queries, bullet points for lists."""
 
 
 @router.post("/chat")
@@ -379,10 +387,10 @@ def chat(body: dict, db: PlannerDB = Depends(get_db)):
             tool_results_text = []
 
             # Loop for tool calling — AI may call multiple tools before responding
-            for _ in range(5):  # Max 5 tool call rounds
+            for _ in range(3):  # Max 3 tool call rounds for speed
                 response = ai_scheduler._client.messages.create(
-                    model=ai_scheduler._model,
-                    max_tokens=1024,
+                    model=CHAT_MODEL,
+                    max_tokens=512,
                     system=SYSTEM,
                     messages=messages,
                     tools=TOOLS,
@@ -419,8 +427,8 @@ def chat(body: dict, db: PlannerDB = Depends(get_db)):
 
             # Stream the final response
             with ai_scheduler._client.messages.stream(
-                model=ai_scheduler._model,
-                max_tokens=1024,
+                model=CHAT_MODEL,
+                max_tokens=512,
                 system=SYSTEM,
                 messages=messages,
             ) as stream:
