@@ -98,32 +98,7 @@ function CourseDetail({ course, tasks }: { course: Course; tasks: Task[] }) {
       <p className="text-secondary text-sm mt-1">{course.name}</p>
 
       {/* Syllabus Section */}
-      <div className="mt-6 p-4 bg-sand rounded-xl">
-        <h3 className="font-display font-semibold text-xs text-muted uppercase tracking-wider mb-3">Syllabus</h3>
-        {course.syllabus_url ? (
-          <div>
-            <a
-              href={course.syllabus_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent hover:text-accent-hover text-sm underline"
-            >
-              Open Syllabus
-            </a>
-            {course.syllabus_text && course.syllabus_text.length > 10 && (
-              <div className="mt-3 text-xs text-secondary whitespace-pre-wrap max-h-60 overflow-y-auto">
-                {course.syllabus_text}
-              </div>
-            )}
-          </div>
-        ) : course.syllabus_text && course.syllabus_text.length > 10 ? (
-          <div className="text-xs text-secondary whitespace-pre-wrap max-h-60 overflow-y-auto">
-            {course.syllabus_text}
-          </div>
-        ) : (
-          <p className="text-muted text-sm">No syllabus found on Canvas.</p>
-        )}
-      </div>
+      <SyllabusPanel syllabusUrl={course.syllabus_url} syllabusText={course.syllabus_text} />
 
       {/* Grades Section */}
       <div className="mt-6 p-4 bg-sand rounded-xl">
@@ -192,6 +167,103 @@ function CourseDetail({ course, tasks }: { course: Course; tasks: Task[] }) {
         <p className="text-xs text-muted mt-6">
           Last synced: {new Date(course.updated_at).toLocaleString()}
         </p>
+      )}
+    </div>
+  )
+}
+
+function SyllabusPanel({ syllabusUrl, syllabusText }: { syllabusUrl: string | null; syllabusText: string | null }) {
+  const [open, setOpen] = useState(false)
+
+  const hasSyllabus = syllabusUrl || (syllabusText && syllabusText.length > 10)
+  const isPdf = syllabusUrl?.toLowerCase().includes('.pdf') || syllabusUrl?.includes('/download')
+  const isCanvasFile = syllabusUrl?.includes('instructure.com/files') || syllabusUrl?.includes('/download')
+
+  // Clean HTML tags from syllabus_text for display
+  const cleanText = syllabusText
+    ? syllabusText.replace(/<[^>]+>/g, '').trim()
+    : null
+
+  return (
+    <div className="mt-6 bg-sand rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between p-4 hover:bg-border/30 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <h3 className="font-display font-semibold text-sm text-primary">Syllabus</h3>
+          {hasSyllabus ? (
+            <span className="text-[10px] font-medium text-success bg-success/10 px-1.5 py-0.5 rounded-full">Available</span>
+          ) : (
+            <span className="text-[10px] font-medium text-muted bg-cream px-1.5 py-0.5 rounded-full">Not found</span>
+          )}
+        </div>
+        <span className={`text-muted transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
+          {'\u25BC'}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-border/50">
+          {!hasSyllabus ? (
+            <p className="text-muted text-sm p-4">No syllabus found on Canvas.</p>
+          ) : (
+            <div>
+              {/* Action bar */}
+              {syllabusUrl && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-cream/50">
+                  <a
+                    href={syllabusUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent hover:text-accent-hover text-xs font-medium flex items-center gap-1"
+                  >
+                    Open in new tab {'\u2197'}
+                  </a>
+                  {isPdf && (
+                    <a
+                      href={syllabusUrl}
+                      download
+                      className="text-secondary hover:text-primary text-xs font-medium flex items-center gap-1"
+                    >
+                      Download {'\u2193'}
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {/* Embedded viewer */}
+              {syllabusUrl && (
+                <div className="relative">
+                  {isPdf || isCanvasFile ? (
+                    <iframe
+                      src={syllabusUrl.replace('?wrap=1', '') + (syllabusUrl.includes('?') ? '&' : '?') + 'preview=1'}
+                      className="w-full border-0"
+                      style={{ height: '70vh', minHeight: '400px' }}
+                      title="Syllabus"
+                      sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    />
+                  ) : (
+                    <iframe
+                      src={syllabusUrl}
+                      className="w-full border-0"
+                      style={{ height: '70vh', minHeight: '400px' }}
+                      title="Syllabus"
+                      sandbox="allow-same-origin allow-scripts allow-popups"
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Fallback text content if no URL or iframe fails */}
+              {!syllabusUrl && cleanText && (
+                <div className="p-4 text-sm text-primary leading-relaxed whitespace-pre-wrap max-h-[60vh] overflow-y-auto">
+                  {cleanText}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
