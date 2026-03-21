@@ -34,7 +34,29 @@ def oauth_callback(code: str, state: str, db: PlannerDB = Depends(get_db)):
         auth_manager.store_tokens(email, auth_manager.credentials_to_dict(credentials))
         scopes = " ".join(credentials.scopes) if credentials.scopes else ""
         db.add_account(email, "google", scopes)
-        return {"status": "ok", "email": email, "message": "Account connected. You can close this tab."}
+
+        # Issue a JWT and redirect to app (handles both login and account linking)
+        from src.planner.api.login import _make_jwt, ALLOWED_EMAIL
+        import os
+        allowed = os.environ.get("ALLOWED_EMAIL", ALLOWED_EMAIL)
+
+        if email.lower() == allowed.lower():
+            token = _make_jwt(email)
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(f"""<!DOCTYPE html><html><body>
+<script>
+localStorage.setItem('planner_token', '{token}');
+window.location.href = '/';
+</script>
+<p>Logging in as {email}...</p>
+</body></html>""")
+        else:
+            # Not the owner — just connecting an account for syncing
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(f"""<!DOCTYPE html><html><body>
+<script>window.close();</script>
+<p>Account {email} connected. You can close this tab.</p>
+</body></html>""")
     except ValueError as e:
         return {"error": str(e)}
 
