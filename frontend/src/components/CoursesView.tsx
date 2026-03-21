@@ -176,8 +176,7 @@ function SyllabusPanel({ syllabusUrl, syllabusText }: { syllabusUrl: string | nu
   const [open, setOpen] = useState(false)
 
   const hasSyllabus = syllabusUrl || (syllabusText && syllabusText.length > 10)
-  const isPdf = syllabusUrl?.toLowerCase().includes('.pdf') || syllabusUrl?.includes('/download')
-  const isCanvasFile = syllabusUrl?.includes('instructure.com/files') || syllabusUrl?.includes('/download')
+  const isPdf = syllabusUrl?.toLowerCase().includes('.pdf') || syllabusUrl?.includes('/download') || syllabusUrl?.includes('instructure.com/files')
 
   // Clean HTML tags from syllabus_text for display
   const cleanText = syllabusText
