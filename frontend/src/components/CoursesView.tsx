@@ -98,7 +98,12 @@ function CourseDetail({ course, tasks }: { course: Course; tasks: Task[] }) {
       <p className="text-secondary text-sm mt-1">{course.name}</p>
 
       {/* Syllabus Section */}
-      <SyllabusPanel syllabusUrl={course.syllabus_url} syllabusText={course.syllabus_text} />
+      <SyllabusPanel
+        courseId={course.id}
+        syllabusUrl={course.syllabus_url}
+        syllabusText={course.syllabus_text}
+        syllabusFile={course.syllabus_file}
+      />
 
       {/* Grades Section */}
       <div className="mt-6 p-4 bg-sand rounded-xl">
@@ -172,11 +177,18 @@ function CourseDetail({ course, tasks }: { course: Course; tasks: Task[] }) {
   )
 }
 
-function SyllabusPanel({ syllabusUrl, syllabusText }: { syllabusUrl: string | null; syllabusText: string | null }) {
+function SyllabusPanel({ courseId, syllabusUrl, syllabusText, syllabusFile }: {
+  courseId: number
+  syllabusUrl: string | null
+  syllabusText: string | null
+  syllabusFile: string | null
+}) {
   const [open, setOpen] = useState(false)
 
-  const hasSyllabus = syllabusUrl || (syllabusText && syllabusText.length > 10)
-  const isPdf = syllabusUrl?.toLowerCase().includes('.pdf') || syllabusUrl?.includes('/download') || syllabusUrl?.includes('instructure.com/files')
+  const hasSyllabus = syllabusFile || syllabusUrl || (syllabusText && syllabusText.length > 10)
+
+  // Use our own server to serve the file — no CORS/X-Frame issues
+  const embedUrl = syllabusFile ? `/api/courses/${courseId}/syllabus-file` : null
 
   // Clean HTML tags from syllabus_text for display
   const cleanText = syllabusText
@@ -209,8 +221,27 @@ function SyllabusPanel({ syllabusUrl, syllabusText }: { syllabusUrl: string | nu
           ) : (
             <div>
               {/* Action bar */}
-              {syllabusUrl && (
-                <div className="flex items-center gap-3 px-4 py-2 bg-cream/50">
+              <div className="flex items-center gap-3 px-4 py-2 bg-cream/50">
+                {embedUrl && (
+                  <a
+                    href={embedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent hover:text-accent-hover text-xs font-medium flex items-center gap-1"
+                  >
+                    Open in new tab {'\u2197'}
+                  </a>
+                )}
+                {embedUrl && (
+                  <a
+                    href={embedUrl}
+                    download
+                    className="text-secondary hover:text-primary text-xs font-medium flex items-center gap-1"
+                  >
+                    Download {'\u2193'}
+                  </a>
+                )}
+                {!embedUrl && syllabusUrl && (
                   <a
                     href={syllabusUrl}
                     target="_blank"
@@ -219,32 +250,19 @@ function SyllabusPanel({ syllabusUrl, syllabusText }: { syllabusUrl: string | nu
                   >
                     Open in new tab {'\u2197'}
                   </a>
-                  {isPdf && (
-                    <a
-                      href={syllabusUrl}
-                      download
-                      className="text-secondary hover:text-primary text-xs font-medium flex items-center gap-1"
-                    >
-                      Download {'\u2193'}
-                    </a>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Syllabus content */}
-              {syllabusUrl && isPdf && (
-                <div className="relative">
-                  <iframe
-                    src={`https://docs.google.com/gview?url=${encodeURIComponent(syllabusUrl)}&embedded=true`}
-                    className="w-full border-0"
-                    style={{ height: '70vh', minHeight: '400px' }}
-                    title="Syllabus PDF"
-                  />
-                </div>
-              )}
-
-              {/* For non-PDF links, show a styled link card instead of iframe */}
-              {syllabusUrl && !isPdf && (
+              {/* Embedded syllabus from our server — no X-Frame-Options issues */}
+              {embedUrl ? (
+                <iframe
+                  src={embedUrl}
+                  className="w-full border-0"
+                  style={{ height: '70vh', minHeight: '400px' }}
+                  title="Syllabus"
+                />
+              ) : syllabusUrl ? (
+                /* External link card for URLs we couldn't download */
                 <div className="p-6 flex flex-col items-center gap-3">
                   <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center text-accent text-xl">
                     {'\u{1F4C4}'}
@@ -259,11 +277,18 @@ function SyllabusPanel({ syllabusUrl, syllabusText }: { syllabusUrl: string | nu
                     Open Syllabus {'\u2197'}
                   </a>
                 </div>
+              ) : cleanText && cleanText.length > 10 ? (
+                /* Raw text from Canvas syllabus body */
+                <div className="p-4 text-sm text-primary leading-relaxed whitespace-pre-wrap max-h-[40vh] overflow-y-auto">
+                  {cleanText}
+                </div>
+              ) : (
+                <p className="text-muted text-sm p-4">No syllabus content available.</p>
               )}
 
-              {/* Text content from Canvas syllabus body */}
-              {cleanText && cleanText.length > 10 && (
-                <div className="p-4 text-sm text-primary leading-relaxed whitespace-pre-wrap max-h-[40vh] overflow-y-auto border-t border-border/50">
+              {/* Show text body below embed if there's supplementary text content */}
+              {embedUrl && cleanText && cleanText.length > 10 && (
+                <div className="p-4 text-sm text-primary leading-relaxed whitespace-pre-wrap max-h-[20vh] overflow-y-auto border-t border-border/50">
                   {cleanText}
                 </div>
               )}

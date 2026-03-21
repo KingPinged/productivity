@@ -83,6 +83,7 @@ export interface Course {
   code: string | null
   syllabus_url: string | null
   syllabus_text: string | null
+  syllabus_file: string | null
   instructor: string | null
   schedule_info: string | null
   updated_at: string | null
