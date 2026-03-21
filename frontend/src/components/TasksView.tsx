@@ -50,7 +50,7 @@ export default function TasksView() {
     <div className="h-full flex flex-col">
       <QuickAddTask onAdd={addTask} />
 
-      <div className="flex-1 grid grid-cols-3 gap-4 min-h-0">
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 min-h-0 overflow-y-auto">
         <TaskColumn
           title="Now"
           subtitle="Due today/tomorrow"

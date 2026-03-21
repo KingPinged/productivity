@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { hasToken } from './api/client'
 import LoginPage from './components/LoginPage'
 import Sidebar from './components/Sidebar'
+import BottomNav from './components/BottomNav'
 import CalendarView from './components/CalendarView'
 import SettingsView from './components/SettingsView'
 import TasksView from './components/TasksView'
@@ -71,15 +72,19 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-cream font-body">
-      <Sidebar currentView={view} onNavigate={setView} />
-      <main className="flex-1 overflow-auto">
+      {/* Desktop sidebar — hidden on mobile */}
+      <div className="hidden md:flex">
+        <Sidebar currentView={view} onNavigate={setView} />
+      </div>
+
+      <main className="flex-1 overflow-auto pb-20 md:pb-0">
         {view === 'today' && (
           <div className="h-full flex flex-col">
-            <div className="px-8 pt-6 pb-2">
-              <h1 className="font-display font-bold text-2xl text-primary mb-1">
+            <div className="px-4 md:px-8 pt-4 md:pt-6 pb-2">
+              <h1 className="font-display font-bold text-xl md:text-2xl text-primary mb-1">
                 {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
               </h1>
-              <p className="text-secondary text-sm mb-5">Plan your day, stay on track</p>
+              <p className="text-secondary text-sm mb-4 md:mb-5">Plan your day, stay on track</p>
               <ContextInput onSubmit={addMessage} onReplan={handleReplan} onChatDone={handleChatDone} chatResponse={chatResponse} setChatResponse={setChatResponse} chatActions={chatActions} setChatActions={setChatActions} />
               <DaySummary
                 summary={summary}
@@ -89,7 +94,7 @@ export default function App() {
                 onDismissAlert={(i: number) => setDismissedAlerts(prev => new Set(prev).add(i))}
               />
             </div>
-            <div className="flex-1 min-h-0 px-8 pb-6">
+            <div className="flex-1 min-h-0 px-4 md:px-8 pb-4 md:pb-6">
               <div className="h-full bg-surface rounded-2xl shadow-soft border border-border overflow-hidden">
                 <CalendarView mode="day" key={`day-${refreshKey}`} />
               </div>
@@ -97,31 +102,35 @@ export default function App() {
           </div>
         )}
         {view === 'week' && (
-          <div className="h-full p-8">
-            <h1 className="font-display font-bold text-2xl text-primary mb-6">Week Overview</h1>
-            <div className="h-[calc(100%-3.5rem)] bg-surface rounded-2xl shadow-soft border border-border overflow-hidden">
+          <div className="h-full p-4 md:p-8">
+            <h1 className="font-display font-bold text-xl md:text-2xl text-primary mb-4 md:mb-6">Week Overview</h1>
+            <div className="h-[calc(100%-3rem)] md:h-[calc(100%-3.5rem)] bg-surface rounded-2xl shadow-soft border border-border overflow-hidden">
               <CalendarView mode="week" key={`week-${refreshKey}`} />
             </div>
           </div>
         )}
         {view === 'settings' && (
-          <div className="p-8">
-            <h1 className="font-display font-bold text-2xl text-primary mb-6">Settings</h1>
+          <div className="p-4 md:p-8">
+            <h1 className="font-display font-bold text-xl md:text-2xl text-primary mb-4 md:mb-6">Settings</h1>
             <SettingsView />
           </div>
         )}
         {view === 'tasks' && (
-          <div className="h-full p-8">
-            <h1 className="font-display font-bold text-2xl text-primary mb-6">Tasks</h1>
+          <div className="h-full p-4 md:p-8">
+            <h1 className="font-display font-bold text-xl md:text-2xl text-primary mb-4 md:mb-6">Tasks</h1>
             <TasksView key={`tasks-${refreshKey}`} />
           </div>
         )}
         {view === 'courses' && (
-          <div className="h-full p-8">
+          <div className="h-full p-4 md:p-8">
             <CoursesView />
           </div>
         )}
       </main>
+
+      {/* Mobile bottom nav — hidden on desktop */}
+      <BottomNav currentView={view} onNavigate={setView} />
+
       <ReminderToast />
     </div>
   )

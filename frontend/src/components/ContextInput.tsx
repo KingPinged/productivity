@@ -124,7 +124,7 @@ export default function ContextInput({ onChatDone, chatResponse, setChatResponse
           ) : 'Send'}
         </button>
       </div>
-      <div className="flex flex-wrap gap-1.5 mt-2">
+      <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible scrollbar-hide">
         {SUGGESTIONS.map((s) => (
           <button
             key={s}

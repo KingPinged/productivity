@@ -25,9 +25,9 @@ export default function CoursesView() {
   }
 
   return (
-    <div className="h-full flex gap-6">
-      {/* Course List */}
-      <div className="w-80 flex-shrink-0 space-y-3 overflow-y-auto">
+    <div className="h-full flex flex-col md:flex-row gap-4 md:gap-6">
+      {/* Course List — hidden on mobile when a course is selected */}
+      <div className={`${selectedCourse ? 'hidden md:block' : ''} w-full md:w-80 flex-shrink-0 space-y-3 overflow-y-auto`}>
         <h2 className="font-display font-bold text-xl text-primary mb-4">Courses</h2>
         {courses.map((course) => {
           const courseTasks = getCourseTasks(course.name)
@@ -58,12 +58,21 @@ export default function CoursesView() {
         })}
       </div>
 
-      {/* Course Detail */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Course Detail — full width on mobile */}
+      <div className={`${!selectedCourse ? 'hidden md:block' : ''} flex-1 overflow-y-auto`}>
         {selectedCourse ? (
-          <CourseDetail course={selectedCourse} tasks={getCourseTasks(selectedCourse.name)} />
+          <div>
+            {/* Back button on mobile */}
+            <button
+              onClick={() => setSelectedCourse(null)}
+              className="md:hidden text-accent text-sm font-medium mb-3 flex items-center gap-1"
+            >
+              &larr; Back to courses
+            </button>
+            <CourseDetail course={selectedCourse} tasks={getCourseTasks(selectedCourse.name)} />
+          </div>
         ) : (
-          <div className="text-muted text-center mt-20">
+          <div className="hidden md:block text-muted text-center mt-20">
             Select a course to view details
           </div>
         )}
