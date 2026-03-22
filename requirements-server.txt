@@ -4,6 +4,7 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 aiosqlite>=0.20.0
 keyring>=25.0.0
+keyrings.alt>=5.0.0
 cryptography>=43.0.0
 google-auth-oauthlib>=1.2.0
 google-api-python-client>=2.140.0
