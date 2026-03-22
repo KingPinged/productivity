@@ -335,8 +335,8 @@ def _build_context_summary(db: PlannerDB) -> str:
     today = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%I:%M %p")
     day_of_week = now.strftime("%A")
-    parts = [f"Today is {day_of_week}, {today}. The current time is {current_time} Central Time."]
-    parts.append("IMPORTANT: Use get_schedule tool to look up the actual current schedule. Do NOT guess or use stale data.")
+    parts = [f"TODAY IS {day_of_week}, {today}. The current time is {current_time} Central Daylight Time (CDT, UTC-5)."]
+    parts.append(f"IMPORTANT: Today's date is {today} ({day_of_week}). Use this date when calling get_schedule. Do NOT use any other date unless the student asks about a different day.")
 
     # Grades (compact, stable data)
     courses = db.get_courses()
@@ -365,8 +365,9 @@ CRITICAL RULES:
 1. NEVER output HTML. Only use markdown (headers, bold, bullets, etc).
 2. ALWAYS call get_schedule before answering questions about the schedule. NEVER guess schedule data from memory or context — always fetch fresh data.
 3. Use 12-hour time format (e.g., "2:00 PM" not "14:00").
-4. The student is in US Central Time (CT). All times you mention should be in Central Time.
+4. The student is in US Central Daylight Time (CDT, UTC-5). All times you mention should be in Central Time.
 5. When the student asks about their schedule, events, or "what do I have", call get_schedule FIRST, then answer based on the tool result.
+6. TRUST the date and time provided in the context. The context says what day it is — use THAT date, not your own assumption. If the context says "Saturday" then today IS Saturday.
 
 When the student tells you something:
 - About their day/state → add_context + replan_schedule, tell them what changed
