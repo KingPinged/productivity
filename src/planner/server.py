@@ -197,9 +197,13 @@ def create_app(
         from datetime import datetime
         from zoneinfo import ZoneInfo
         today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+        # Clear ALL unfired reminders first to prevent duplicates
+        conn = db._get_conn()
+        conn.execute("DELETE FROM reminders WHERE fired = 0")
+        conn.commit()
         count = reminder_service.generate_reminders_for_date(today)
-        reminder_service.generate_deadline_reminders()
-        logger.info("Generated %d reminders for %s", count, today)
+        count2 = reminder_service.generate_deadline_reminders()
+        logger.info("Generated %d schedule + %d deadline reminders for %s", count, count2, today)
 
     # Generate reminders on startup (delayed to let schedule generate first)
     scheduler._scheduler.add_job(
