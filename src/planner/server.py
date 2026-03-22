@@ -1,5 +1,6 @@
 import json as json_module
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ from src.planner.api import push as push_module
 from src.planner.reminders.service import ReminderService
 from src.planner.reminders.notifier import Notifier
 from src.planner.ai.scheduler import AIScheduler
+from src.planner.ai.memory import SmartMemory
 from src.planner.db import PlannerDB
 from src.planner.ingestion.google_auth import GoogleAuthManager
 from src.planner.ingestion.sync_scheduler import SyncScheduler
@@ -134,6 +136,11 @@ def create_app(
     if anthropic_key:
         schedule_module.ai_scheduler = AIScheduler(db, api_key=anthropic_key)
         chat_module.ai_scheduler = schedule_module.ai_scheduler
+        # Smart memory setup
+        data_dir = str(Path(db_path).parent) if db_path else "/app/data"
+        smart_mem = SmartMemory(db, api_key=anthropic_key, data_dir=data_dir)
+        smart_mem.index_all()  # Index existing memories on startup
+        schedule_module.ai_scheduler.set_smart_memory(smart_mem)
         # Connect AI scheduler to sync scheduler for auto-replanning
         scheduler.set_ai_scheduler(schedule_module.ai_scheduler)
         # Generate initial week schedule on startup

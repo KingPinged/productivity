@@ -24,6 +24,7 @@ class AIScheduler:
         self._model = model
         self._client = anthropic.Anthropic(api_key=api_key)
         self._context_builder = ContextBuilder(db)
+        self._smart_memory = None  # Set by server.py
 
     def generate(self, date: str) -> dict | None:
         """Generate a full schedule for the given date. Returns parsed result or None."""
@@ -166,6 +167,9 @@ class AIScheduler:
 
         return results
 
+    def set_smart_memory(self, smart_memory):
+        self._smart_memory = smart_memory
+
     def _extract_and_store_memories(self, date: str, result: dict, user_context: list) -> None:
         """Store important scheduling decisions as memories."""
         # Store what was planned
@@ -195,6 +199,10 @@ class AIScheduler:
                 content=f"On {date}, deferred: {', '.join(tasks_later)}",
                 importance=4,
             )
+
+        # Index new memories for smart search
+        if self._smart_memory:
+            self._smart_memory.index_all()
 
     def parse_response(self, raw_text: str) -> dict | None:
         """Parse and validate Claude's JSON response."""

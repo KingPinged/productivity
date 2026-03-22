@@ -247,13 +247,24 @@ def _execute_tool(tool_name: str, tool_input: dict, db: PlannerDB) -> str:
         return "\n".join(lines)
 
     elif tool_name == "search_memory":
-        memories = db.search_memories(tool_input["query"], limit=10)
-        if not memories:
-            return f"No memories found matching \"{tool_input['query']}\"."
-        lines = [f"Found {len(memories)} memories:"]
-        for m in memories:
-            lines.append(f"- [{m['category']}] {m['content']}")
-        return "\n".join(lines)
+        # Use smart vector search if available
+        if ai_scheduler and hasattr(ai_scheduler, '_smart_memory') and ai_scheduler._smart_memory:
+            results = ai_scheduler._smart_memory.search(tool_input["query"], limit=10)
+            if not results:
+                return f'No memories found matching "{tool_input["query"]}".'
+            lines = [f"Found {len(results)} relevant memories:"]
+            for m in results:
+                lines.append(f"- [{m['category']}] (relevance: {m['relevance_score']}) {m['content']}")
+            return "\n".join(lines)
+        else:
+            # Fallback to simple search
+            memories = db.search_memories(tool_input["query"], limit=10)
+            if not memories:
+                return f'No memories found matching "{tool_input["query"]}".'
+            lines = [f"Found {len(memories)} memories:"]
+            for m in memories:
+                lines.append(f"- [{m['category']}] {m['content']}")
+            return "\n".join(lines)
 
     elif tool_name == "add_calendar_event":
         import secrets
@@ -383,7 +394,14 @@ def chat(body: dict, db: PlannerDB = Depends(get_db)):
 
     def generate():
         try:
-            messages = [{"role": "user", "content": f"{context_summary}\n\n---\n\nStudent: {message}"}]
+            # Smart memory search based on user's message
+            enriched_context = context_summary
+            if ai_scheduler and hasattr(ai_scheduler, '_smart_memory') and ai_scheduler._smart_memory:
+                relevant_memories = ai_scheduler._smart_memory.get_context_for_prompt(message)
+                if relevant_memories:
+                    enriched_context += "\n\n" + relevant_memories
+
+            messages = [{"role": "user", "content": f"{enriched_context}\n\n---\n\nStudent: {message}"}]
             tool_results_text = []
 
             # Loop for tool calling — AI may call multiple tools before responding
