@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from src.planner.db import PlannerDB
 from src.planner.ingestion.syllabus_parser import (
@@ -223,22 +223,17 @@ def update_grade_scale(course_id: int, body: ScaleBody, db: PlannerDB = Depends(
 def reparse_syllabus(course_id: int, db: PlannerDB = Depends(get_db)):
     course = db.get_course(course_id)
     if not course:
-        return {"error": "Course not found"}
+        raise HTTPException(status_code=404, detail="Course not found")
 
     syllabus_text = course.get("syllabus_text") or ""
     if not syllabus_text.strip():
-        return {"error": "No syllabus text available", "parsed": False}
+        raise HTTPException(status_code=400, detail="No syllabus text available")
 
     parsed = parse_syllabus_for_course(syllabus_text)
 
     # Delete existing auto-parsed entries, keep manual
-    conn = db._get_conn()
-    conn.execute(
-        "DELETE FROM grade_categories WHERE course_id = ? AND source = 'auto'",
-        (course_id,),
-    )
-    conn.execute("DELETE FROM grade_scales WHERE course_id = ?", (course_id,))
-    conn.commit()
+    db.delete_auto_grade_categories(course_id)
+    db.set_grade_scale(course_id, [])
 
     for w in parsed["grade_weights"]:
         weight_num = float(w["weight"].replace("%", ""))
