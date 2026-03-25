@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useCourses } from '../hooks/useCourses'
 import { useTasks } from '../hooks/useTasks'
-import { apiFetch } from '../api/client'
 import type { Course, Task } from '../types'
+import GradeCalculator from './GradeCalculator'
 
 export default function CoursesView() {
   const { courses, loading } = useCourses()
@@ -82,16 +82,6 @@ export default function CoursesView() {
 }
 
 function CourseDetail({ course, tasks }: { course: Course; tasks: Task[] }) {
-  const [grades, setGrades] = useState<any[]>([])
-  const [currentGrade, setCurrentGrade] = useState<string | null>(course.current_grade || null)
-
-  useEffect(() => {
-    apiFetch<any>(`/api/courses/${course.id}`).then(data => {
-      if (data.grades) setGrades(data.grades)
-      if (data.current_grade) setCurrentGrade(data.current_grade)
-    }).catch(() => {})
-  }, [course.id])
-
   return (
     <div>
       <h2 className="font-display font-bold text-xl text-primary">{course.code || course.name}</h2>
@@ -105,29 +95,8 @@ function CourseDetail({ course, tasks }: { course: Course; tasks: Task[] }) {
         syllabusFile={course.syllabus_file}
       />
 
-      {/* Grades Section */}
-      <div className="mt-6 p-4 bg-sand rounded-xl">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-display font-semibold text-sm text-secondary uppercase tracking-wider">Grades</h3>
-          {currentGrade && (
-            <span className="text-lg font-display font-bold text-primary">{currentGrade}</span>
-          )}
-        </div>
-        {grades.length > 0 ? (
-          <div className="space-y-1.5">
-            {grades.map((g: any, i: number) => (
-              <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
-                <span className="text-sm text-primary truncate flex-1">{g.assignment_name}</span>
-                <span className={`text-sm font-medium ml-4 ${g.score ? 'text-primary' : 'text-muted'}`}>
-                  {g.score || '-'}{g.points_possible ? ` / ${g.points_possible}` : ''}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-muted text-sm">No grades available yet.</p>
-        )}
-      </div>
+      {/* Grade Calculator */}
+      <GradeCalculator courseId={course.id} />
 
       {/* Course info */}
       {course.instructor && (
