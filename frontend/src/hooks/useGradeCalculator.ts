@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { apiFetch } from '../api/client'
-import type { GradeCalculatorData, GradeCategory, GradeScaleEntry } from '../types'
+import type { GradeCalculatorData, GradeCategory } from '../types'
 
 interface Override {
   gradeId: number | null
