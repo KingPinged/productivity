@@ -307,10 +307,15 @@ function WeightsEditor({
 
   const handleSave = async () => {
     setSaving(true)
-    await onSaveCategories(cats)
-    await onSaveScale(scale)
-    setSaving(false)
-    onClose()
+    try {
+      await onSaveCategories(cats)
+      await onSaveScale(scale)
+      onClose()
+    } catch {
+      // save failed, stay open so user can retry
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (

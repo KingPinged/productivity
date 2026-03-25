@@ -814,6 +814,14 @@ class PlannerDB:
         )
         return cursor.fetchone()[0] > 0
 
+    def delete_auto_grade_categories(self, course_id: int) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "DELETE FROM grade_categories WHERE course_id = ? AND source = 'auto'",
+            (course_id,),
+        )
+        conn.commit()
+
     # --- Grade Scale CRUD ---
 
     def upsert_grade_scale(self, course_id: int, letter: str, min_percent: float, max_percent: float | None = None) -> int:

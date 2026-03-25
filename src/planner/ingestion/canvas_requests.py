@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from src.planner.db import PlannerDB
 from src.planner.encryption import EncryptionManager
-from src.planner.ingestion.syllabus_parser import parse_syllabus_for_course, map_assignment_to_category
+from src.planner.ingestion.syllabus_parser import parse_syllabus_for_course
 
 logger = logging.getLogger(__name__)
 
@@ -302,8 +302,6 @@ class CanvasRequestsScraper:
                     {"student_ids[]": "self", "include[]": "assignment", "per_page": "100"}
                 )
                 if submissions:
-                    db_course = None
-                    cursor = conn = None
                     conn = self._db._get_conn()
                     cursor = conn.execute(
                         "SELECT id FROM courses WHERE canvas_course_id = ?", (course_id,)
