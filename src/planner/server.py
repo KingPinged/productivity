@@ -21,6 +21,7 @@ from src.planner.api import sync as sync_module
 from src.planner.api import canvas as canvas_module
 from src.planner.api import tasks as tasks_module
 from src.planner.api import courses as courses_module
+from src.planner.api import grade_calculator as grade_calc_module
 from src.planner.api import chat as chat_module
 from src.planner.api import reminders as reminders_module
 from src.planner.api import push as push_module
@@ -153,6 +154,12 @@ def create_app(
     app.include_router(courses_module.router)
     # Syllabus files served without auth (iframes can't send JWT)
     app.include_router(courses_module.public_router)
+
+    # Grade calculator routes
+    app.dependency_overrides[grade_calc_module.get_db] = get_db
+    for route in grade_calc_module.router.routes:
+        route.dependencies = [require_token]
+    app.include_router(grade_calc_module.router)
 
     # Task routes
     app.dependency_overrides[tasks_module.get_db] = get_db
