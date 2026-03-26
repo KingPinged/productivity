@@ -750,6 +750,11 @@ class PlannerDB:
         conn.execute("UPDATE grades SET category = ? WHERE id = ?", (category, grade_id))
         conn.commit()
 
+    def delete_grade(self, grade_id: int) -> None:
+        conn = self._get_conn()
+        conn.execute("DELETE FROM grades WHERE id = ?", (grade_id,))
+        conn.commit()
+
     def get_grades_for_course(self, course_id: int) -> list[dict]:
         conn = self._get_conn()
         conn.row_factory = sqlite3.Row

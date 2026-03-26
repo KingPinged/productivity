@@ -85,6 +85,20 @@ export function useGradeCalculator(courseId: number | null) {
     await load()
   }, [courseId, load])
 
+  const moveAssignment = useCallback(async (gradeId: number, category: string | null) => {
+    await apiFetch(`/api/grades/${gradeId}/category`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category }),
+    })
+    await load()
+  }, [load])
+
+  const deleteAssignment = useCallback(async (gradeId: number) => {
+    await apiFetch(`/api/grades/${gradeId}`, { method: 'DELETE' })
+    await load()
+  }, [load])
+
   return {
     data: computed,
     rawData: data,
@@ -96,6 +110,8 @@ export function useGradeCalculator(courseId: number | null) {
     saveCategories,
     saveScale,
     reparseSyllabus,
+    moveAssignment,
+    deleteAssignment,
     reload: load,
   }
 }

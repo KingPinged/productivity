@@ -217,6 +217,24 @@ def update_grade_categories(course_id: int, body: CategoriesBody, db: PlannerDB 
     return {"ok": True}
 
 
+class MoveGradeBody(BaseModel):
+    category: str | None
+
+
+@router.put("/grades/{grade_id}/category")
+def move_grade_category(grade_id: int, body: MoveGradeBody, db: PlannerDB = Depends(get_db)):
+    """Move an assignment to a different category."""
+    db.update_grade_category(grade_id, body.category)
+    return {"ok": True}
+
+
+@router.delete("/grades/{grade_id}")
+def delete_grade(grade_id: int, db: PlannerDB = Depends(get_db)):
+    """Delete an assignment from grade tracking."""
+    db.delete_grade(grade_id)
+    return {"ok": True}
+
+
 @router.put("/courses/{course_id}/grade-scale")
 def update_grade_scale(course_id: int, body: ScaleBody, db: PlannerDB = Depends(get_db)):
     db.set_grade_scale(

@@ -7,6 +7,7 @@ export default function GradeCalculator({ courseId }: { courseId: number }) {
     data, loading, overrides,
     setOverride, removeOverride, resetOverrides,
     saveCategories, saveScale, reparseSyllabus,
+    moveAssignment, deleteAssignment,
   } = useGradeCalculator(courseId)
   const [editingWeights, setEditingWeights] = useState(false)
   const hasOverrides = overrides.size > 0
@@ -76,9 +77,12 @@ export default function GradeCalculator({ courseId }: { courseId: number }) {
         <CategorySection
           key={cat.name}
           category={cat}
+          allCategoryNames={data.categories.map(c => c.name)}
           overrides={overrides}
           onSetOverride={setOverride}
           onRemoveOverride={removeOverride}
+          onMoveAssignment={moveAssignment}
+          onDeleteAssignment={deleteAssignment}
         />
       ))}
     </div>
@@ -86,12 +90,15 @@ export default function GradeCalculator({ courseId }: { courseId: number }) {
 }
 
 function CategorySection({
-  category, overrides, onSetOverride, onRemoveOverride,
+  category, allCategoryNames, overrides, onSetOverride, onRemoveOverride, onMoveAssignment, onDeleteAssignment,
 }: {
   category: GradeCategory
+  allCategoryNames: string[]
   overrides: Map<string, any>
   onSetOverride: (key: string, ov: any) => void
   onRemoveOverride: (key: string) => void
+  onMoveAssignment: (gradeId: number, category: string | null) => Promise<void>
+  onDeleteAssignment: (gradeId: number) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState(true)
   const [addingNew, setAddingNew] = useState(false)
@@ -111,6 +118,7 @@ function CategorySection({
               {category.weight}%
             </span>
           )}
+          <span className="text-[10px] text-muted">{category.assignments.length}</span>
         </div>
         <span className="text-sm font-medium text-primary">
           {category.score != null ? `${category.score}%` : '-'}
@@ -124,9 +132,12 @@ function CategorySection({
             <AssignmentRow
               key={a.id ?? `hyp-${i}`}
               assignment={a}
+              allCategoryNames={allCategoryNames}
               overrides={overrides}
               onSetOverride={onSetOverride}
               onRemoveOverride={onRemoveOverride}
+              onMove={onMoveAssignment}
+              onDelete={onDeleteAssignment}
             />
           ))}
           {/* Add hypothetical */}
@@ -155,17 +166,22 @@ function CategorySection({
 }
 
 function AssignmentRow({
-  assignment, overrides, onSetOverride, onRemoveOverride,
+  assignment, allCategoryNames, overrides, onSetOverride, onRemoveOverride, onMove, onDelete,
 }: {
   assignment: GradeAssignment
+  allCategoryNames: string[]
   overrides: Map<string, any>
   onSetOverride: (key: string, ov: any) => void
   onRemoveOverride: (key: string) => void
+  onMove: (gradeId: number, category: string | null) => Promise<void>
+  onDelete: (gradeId: number) => Promise<void>
 }) {
   const key = assignment.id != null ? `existing-${assignment.id}` : `hyp-${assignment.name}`
   const hasOverride = overrides.has(key)
   const [editing, setEditing] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -173,6 +189,16 @@ function AssignmentRow({
       inputRef.current.select()
     }
   }, [editing])
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!showMenu) return
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showMenu])
 
   const scoreDisplay = assignment.score ?? '-'
   const ppDisplay = assignment.points_possible ?? '?'
@@ -191,11 +217,45 @@ function AssignmentRow({
     setEditing(false)
   }
 
+  const otherCategories = allCategoryNames.filter(c => c !== assignment.category)
+
   return (
     <div className={`flex items-center justify-between py-1.5 border-b border-border/30 last:border-0 ${
       assignment.hypothetical ? 'bg-accent-light/30' : ''
     } ${hasOverride ? 'bg-amber-50' : ''}`}>
-      <span className="text-sm text-primary truncate flex-1">{assignment.name}</span>
+      <div className="flex items-center gap-1 flex-1 min-w-0">
+        {/* Context menu trigger */}
+        {assignment.id != null && (
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="text-muted hover:text-secondary text-xs px-0.5 shrink-0"
+              title="Move or delete"
+            >{'\u22EE'}</button>
+            {showMenu && (
+              <div className="absolute left-0 top-full z-20 mt-0.5 bg-white border border-border rounded-lg shadow-lg py-1 min-w-[10rem]">
+                {otherCategories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={async () => { setShowMenu(false); await onMove(assignment.id!, cat) }}
+                    className="block w-full text-left text-xs px-3 py-1.5 hover:bg-cream text-primary"
+                  >
+                    Move to {cat}
+                  </button>
+                ))}
+                <hr className="my-1 border-border/50" />
+                <button
+                  onClick={async () => { setShowMenu(false); await onDelete(assignment.id!) }}
+                  className="block w-full text-left text-xs px-3 py-1.5 hover:bg-red-50 text-red-600"
+                >
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        <span className="text-sm text-primary truncate">{assignment.name}</span>
+      </div>
       <div className="flex items-center gap-1 ml-2">
         {editing ? (
           <input
