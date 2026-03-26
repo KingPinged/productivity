@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from src.planner.db import PlannerDB
 from src.planner.encryption import EncryptionManager
-from src.planner.ingestion.syllabus_parser import parse_syllabus_for_course
+from src.planner.ingestion.syllabus_parser import parse_syllabus_for_course, map_assignment_to_category
 
 logger = logging.getLogger(__name__)
 
@@ -244,17 +244,46 @@ class CanvasRequestsScraper:
                 canvas_config_id=config_id,
             )
 
-            # Auto-parse syllabus for grade weights if we have text
-            if syllabus_text and syllabus_text.strip():
-                conn_inner = self._db._get_conn()
-                cursor_inner = conn_inner.execute(
-                    "SELECT id FROM courses WHERE canvas_course_id = ?", (course_id,)
-                )
-                row_inner = cursor_inner.fetchone()
-                if row_inner:
-                    db_cid = row_inner[0]
-                    if not self._db.has_grade_categories(db_cid):
-                        parsed = parse_syllabus_for_course(syllabus_text)
+            # Auto-parse syllabus for grade weights (PDF/HTML file or DB text)
+            conn_inner = self._db._get_conn()
+            cursor_inner = conn_inner.execute(
+                "SELECT id FROM courses WHERE canvas_course_id = ?", (course_id,)
+            )
+            row_inner = cursor_inner.fetchone()
+            if row_inner:
+                db_cid = row_inner[0]
+                if not self._db.has_grade_categories(db_cid):
+                    # Try PDF/HTML file first, fall back to DB syllabus_text
+                    parse_text = ""
+                    if syllabus_file:
+                        import os
+                        file_path = os.path.join(os.path.dirname(self._db.db_path), "syllabi", syllabus_file)
+                        if os.path.exists(file_path) and syllabus_file.endswith(".pdf"):
+                            try:
+                                import pdfplumber
+                                parts = []
+                                with pdfplumber.open(file_path) as pdf:
+                                    for page in pdf.pages:
+                                        t = page.extract_text()
+                                        if t:
+                                            parts.append(t)
+                                parse_text = "\n".join(parts)
+                            except Exception:
+                                pass
+                        elif os.path.exists(file_path) and syllabus_file.endswith(".html"):
+                            try:
+                                import html as html_mod
+                                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                                    raw = f.read()
+                                parse_text = re.sub(r"<[^>]+>", " ", raw)
+                                parse_text = html_mod.unescape(parse_text)
+                            except Exception:
+                                pass
+                    if not parse_text and syllabus_text:
+                        parse_text = syllabus_text
+
+                    if parse_text.strip():
+                        parsed = parse_syllabus_for_course(parse_text)
                         for w in parsed["grade_weights"]:
                             weight_num = float(w["weight"].replace("%", ""))
                             self._db.upsert_grade_category(db_cid, w["category"], weight_num, source="auto")
@@ -310,6 +339,10 @@ class CanvasRequestsScraper:
                     db_course_id = row[0] if row else None
 
                     if db_course_id:
+                        # Get syllabus-parsed categories (primary) for mapping
+                        syllabus_cats = self._db.get_grade_categories(db_course_id)
+                        syllabus_cat_names = [c["name"] for c in syllabus_cats]
+
                         for sub in submissions:
                             assignment = sub.get("assignment")
                             if not assignment or assignment.get("published") is False:
@@ -318,7 +351,17 @@ class CanvasRequestsScraper:
                             a_name = assignment.get("name", "Untitled")
                             points_possible = assignment.get("points_possible")
                             group_id = assignment.get("assignment_group_id")
-                            cat_name = group_map.get(group_id, "Uncategorized") if group_id else None
+                            canvas_cat = group_map.get(group_id, "Uncategorized") if group_id else None
+
+                            # Prefer syllabus-parsed category, fall back to Canvas group
+                            cat_name = None
+                            if syllabus_cat_names:
+                                cat_name = map_assignment_to_category(a_name, syllabus_cat_names)
+                                if not cat_name and canvas_cat:
+                                    # Try matching Canvas group name to syllabus category
+                                    cat_name = map_assignment_to_category(canvas_cat, syllabus_cat_names)
+                            if not cat_name:
+                                cat_name = canvas_cat
 
                             score = None
                             if (sub.get("score") is not None
