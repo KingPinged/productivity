@@ -75,6 +75,8 @@ def create_app(
     require_token = create_token_dependency(auth_token)
 
     if db_path is None:
+        db_path = os.environ.get("PLANNER_DB_PATH")
+    if db_path is None:
         from src.utils.constants import APP_DATA_DIR
         db_path = str(Path(APP_DATA_DIR) / "planner.db")
 

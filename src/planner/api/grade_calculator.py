@@ -1,3 +1,8 @@
+import html
+import logging
+import os
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from src.planner.db import PlannerDB
@@ -5,6 +10,8 @@ from src.planner.ingestion.syllabus_parser import (
     parse_syllabus_for_course,
     map_assignment_to_category,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -219,16 +226,54 @@ def update_grade_scale(course_id: int, body: ScaleBody, db: PlannerDB = Depends(
     return {"ok": True}
 
 
+def _extract_syllabus_text(course: dict, db: PlannerDB) -> str:
+    """Extract plain text from syllabus file (PDF or HTML) or fall back to DB text."""
+    syllabus_file = course.get("syllabus_file") or ""
+    if syllabus_file:
+        data_dir = os.path.dirname(db.db_path)
+        file_path = os.path.join(data_dir, "syllabi", syllabus_file)
+        if os.path.exists(file_path):
+            if syllabus_file.endswith(".pdf"):
+                try:
+                    import pdfplumber
+                    text_parts = []
+                    with pdfplumber.open(file_path) as pdf:
+                        for page in pdf.pages:
+                            page_text = page.extract_text()
+                            if page_text:
+                                text_parts.append(page_text)
+                    if text_parts:
+                        return "\n".join(text_parts)
+                except Exception as e:
+                    logger.warning("PDF extraction failed for %s: %s", file_path, e)
+            elif syllabus_file.endswith(".html"):
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                        raw = f.read()
+                    # Strip HTML tags, decode entities
+                    text = re.sub(r"<[^>]+>", " ", raw)
+                    text = html.unescape(text)
+                    text = re.sub(r"\s+", " ", text).strip()
+                    if text:
+                        return text
+                except Exception as e:
+                    logger.warning("HTML extraction failed for %s: %s", file_path, e)
+
+    # Fall back to DB syllabus_text field
+    return course.get("syllabus_text") or ""
+
+
 @router.post("/courses/{course_id}/reparse-syllabus")
 def reparse_syllabus(course_id: int, db: PlannerDB = Depends(get_db)):
     course = db.get_course(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    syllabus_text = course.get("syllabus_text") or ""
+    syllabus_text = _extract_syllabus_text(course, db)
     if not syllabus_text.strip():
         raise HTTPException(status_code=400, detail="No syllabus text available")
 
+    logger.info("Parsing syllabus for course %d (%s), text length: %d", course_id, course.get("code"), len(syllabus_text))
     parsed = parse_syllabus_for_course(syllabus_text)
 
     # Delete existing auto-parsed entries, keep manual

@@ -14,6 +14,7 @@ RUN mkdir -p /app/data
 # Store keyring (Google OAuth tokens) on the persistent Docker volume
 ENV PYTHONPATH=/app
 ENV XDG_DATA_HOME=/app/data
+ENV PLANNER_DB_PATH=/app/data/planner.db
 
 EXPOSE 8321
 

@@ -20,12 +20,13 @@ def extract_grade_weights(text: str) -> list[dict]:
         r"(?:homework|assignments?|quizzes?|quiz|exams?|midterms?|mid-?term|finals?"
         r"|final\s+exam|participation|attendance|labs?|laboratory|projects?|papers?"
         r"|essays?|discussion|presentations?|classwork|class\s*work|reading"
-        r"|problem\s+sets?|tests?)"
+        r"|in-?class\s+\w+|problem\s+sets?|tests?)"
     )
 
     # Category first: "Homework 30%", "Exams: 40%"
+    # Only allow non-digit trailing word to avoid "Homework 25" capturing "25" as part of name
     pattern = re.compile(
-        rf"({category_words}(?:\s+\w+)?)\s*[:=]?\s*(\d{{1,3}}(?:\.\d+)?)\s*%",
+        rf"({category_words}(?:\s+[a-zA-Z]+)?)\s*[:=]?\s*(\d{{1,3}}(?:\.\d+)?)\s*%",
         re.IGNORECASE,
     )
     for m in pattern.finditer(text):
@@ -37,7 +38,7 @@ def extract_grade_weights(text: str) -> list[dict]:
 
     # Reversed: "30% Homework"
     reversed_pattern = re.compile(
-        rf"(\d{{1,3}}(?:\.\d+)?)\s*%\s*[:=\-]?\s*({category_words}(?:\s+\w+)?)",
+        rf"(\d{{1,3}}(?:\.\d+)?)\s*%\s*[:=\-]?\s*({category_words}(?:\s+[a-zA-Z]+)?)",
         re.IGNORECASE,
     )
     for m in reversed_pattern.finditer(text):

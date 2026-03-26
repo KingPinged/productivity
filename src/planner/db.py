@@ -607,9 +607,20 @@ class PlannerDB:
 
     def clear_schedule_blocks(self, date, preserve_completed=False):
         conn = self._get_conn()
+        # Delete reminders referencing blocks we're about to remove (FK constraint)
         if preserve_completed:
+            conn.execute(
+                "DELETE FROM reminders WHERE schedule_block_id IN "
+                "(SELECT id FROM schedule_blocks WHERE date = ? AND status != 'completed')",
+                (date,),
+            )
             conn.execute("DELETE FROM schedule_blocks WHERE date = ? AND status != 'completed'", (date,))
         else:
+            conn.execute(
+                "DELETE FROM reminders WHERE schedule_block_id IN "
+                "(SELECT id FROM schedule_blocks WHERE date = ?)",
+                (date,),
+            )
             conn.execute("DELETE FROM schedule_blocks WHERE date = ?", (date,))
         conn.commit()
 
