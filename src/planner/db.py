@@ -151,6 +151,24 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     auth TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS grade_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id INTEGER REFERENCES courses(id),
+    name TEXT NOT NULL,
+    weight REAL NOT NULL,
+    source TEXT NOT NULL DEFAULT 'auto',
+    UNIQUE(course_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS grade_scales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id INTEGER REFERENCES courses(id),
+    letter TEXT NOT NULL,
+    min_percent REAL NOT NULL,
+    max_percent REAL,
+    UNIQUE(course_id, letter)
+);
 """
 
 
@@ -180,6 +198,13 @@ class PlannerDB:
         # Migration: add syllabus_file to courses if missing
         try:
             conn.execute("ALTER TABLE courses ADD COLUMN syllabus_file TEXT")
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
+
+        # Migration: add category to grades if missing
+        try:
+            conn.execute("ALTER TABLE grades ADD COLUMN category TEXT")
             conn.commit()
         except Exception:
             pass  # Column already exists
@@ -582,9 +607,20 @@ class PlannerDB:
 
     def clear_schedule_blocks(self, date, preserve_completed=False):
         conn = self._get_conn()
+        # Delete reminders referencing blocks we're about to remove (FK constraint)
         if preserve_completed:
+            conn.execute(
+                "DELETE FROM reminders WHERE schedule_block_id IN "
+                "(SELECT id FROM schedule_blocks WHERE date = ? AND status != 'completed')",
+                (date,),
+            )
             conn.execute("DELETE FROM schedule_blocks WHERE date = ? AND status != 'completed'", (date,))
         else:
+            conn.execute(
+                "DELETE FROM reminders WHERE schedule_block_id IN "
+                "(SELECT id FROM schedule_blocks WHERE date = ?)",
+                (date,),
+            )
             conn.execute("DELETE FROM schedule_blocks WHERE date = ?", (date,))
         conn.commit()
 
@@ -687,7 +723,8 @@ class PlannerDB:
     # --- Grade CRUD ---
 
     def upsert_grade(self, course_id: int, assignment_name: str, score: str | None = None,
-                     points_possible: str | None = None, status: str = "graded") -> int:
+                     points_possible: str | None = None, status: str = "graded",
+                     category: str | None = None) -> int:
         conn = self._get_conn()
         cursor = conn.execute(
             "SELECT id FROM grades WHERE course_id = ? AND assignment_name = ?",
@@ -696,17 +733,22 @@ class PlannerDB:
         row = cursor.fetchone()
         if row:
             conn.execute(
-                "UPDATE grades SET score=?, points_possible=?, status=? WHERE id=?",
-                (score, points_possible, status, row[0]),
+                "UPDATE grades SET score=?, points_possible=?, status=?, category=? WHERE id=?",
+                (score, points_possible, status, category, row[0]),
             )
             conn.commit()
             return row[0]
         cursor = conn.execute(
-            "INSERT INTO grades (course_id, assignment_name, score, points_possible, status) VALUES (?, ?, ?, ?, ?)",
-            (course_id, assignment_name, score, points_possible, status),
+            "INSERT INTO grades (course_id, assignment_name, score, points_possible, status, category) VALUES (?, ?, ?, ?, ?, ?)",
+            (course_id, assignment_name, score, points_possible, status, category),
         )
         conn.commit()
         return cursor.lastrowid
+
+    def update_grade_category(self, grade_id: int, category: str | None) -> None:
+        conn = self._get_conn()
+        conn.execute("UPDATE grades SET category = ? WHERE id = ?", (category, grade_id))
+        conn.commit()
 
     def get_grades_for_course(self, course_id: int) -> list[dict]:
         conn = self._get_conn()
@@ -738,6 +780,109 @@ class PlannerDB:
     def update_course_grade(self, course_id: int, current_grade: str) -> None:
         conn = self._get_conn()
         conn.execute("UPDATE courses SET current_grade = ? WHERE id = ?", (current_grade, course_id))
+        conn.commit()
+
+    # --- Grade Category CRUD ---
+
+    def upsert_grade_category(self, course_id: int, name: str, weight: float, source: str = "auto") -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT id FROM grade_categories WHERE course_id = ? AND name = ?",
+            (course_id, name),
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                "UPDATE grade_categories SET weight=?, source=? WHERE id=?",
+                (weight, source, row[0]),
+            )
+            conn.commit()
+            return row[0]
+        cursor = conn.execute(
+            "INSERT INTO grade_categories (course_id, name, weight, source) VALUES (?, ?, ?, ?)",
+            (course_id, name, weight, source),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_grade_categories(self, course_id: int) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM grade_categories WHERE course_id = ? ORDER BY name",
+            (course_id,),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def set_grade_categories(self, course_id: int, categories: list[dict], source: str = "manual") -> None:
+        conn = self._get_conn()
+        conn.execute("DELETE FROM grade_categories WHERE course_id = ?", (course_id,))
+        for cat in categories:
+            conn.execute(
+                "INSERT INTO grade_categories (course_id, name, weight, source) VALUES (?, ?, ?, ?)",
+                (course_id, cat["name"], cat["weight"], source),
+            )
+        conn.commit()
+
+    def has_grade_categories(self, course_id: int) -> bool:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM grade_categories WHERE course_id = ?", (course_id,),
+        )
+        return cursor.fetchone()[0] > 0
+
+    def delete_auto_grade_categories(self, course_id: int) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "DELETE FROM grade_categories WHERE course_id = ? AND source = 'auto'",
+            (course_id,),
+        )
+        conn.commit()
+
+    # --- Grade Scale CRUD ---
+
+    def upsert_grade_scale(self, course_id: int, letter: str, min_percent: float, max_percent: float | None = None) -> int:
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT id FROM grade_scales WHERE course_id = ? AND letter = ?",
+            (course_id, letter),
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                "UPDATE grade_scales SET min_percent=?, max_percent=? WHERE id=?",
+                (min_percent, max_percent, row[0]),
+            )
+            conn.commit()
+            return row[0]
+        cursor = conn.execute(
+            "INSERT INTO grade_scales (course_id, letter, min_percent, max_percent) VALUES (?, ?, ?, ?)",
+            (course_id, letter, min_percent, max_percent),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_grade_scale(self, course_id: int) -> list[dict]:
+        conn = self._get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM grade_scales WHERE course_id = ? ORDER BY min_percent DESC",
+            (course_id,),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.row_factory = None
+        return rows
+
+    def set_grade_scale(self, course_id: int, scale: list[dict]) -> None:
+        conn = self._get_conn()
+        conn.execute("DELETE FROM grade_scales WHERE course_id = ?", (course_id,))
+        for entry in scale:
+            conn.execute(
+                "INSERT INTO grade_scales (course_id, letter, min_percent, max_percent) VALUES (?, ?, ?, ?)",
+                (course_id, entry["letter"], entry["min_percent"], entry.get("max_percent")),
+            )
         conn.commit()
 
     # --- AI Memory ---

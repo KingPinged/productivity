@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from src.planner.db import PlannerDB
 from src.planner.encryption import EncryptionManager
+from src.planner.ingestion.syllabus_parser import parse_syllabus_for_course
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +244,23 @@ class CanvasRequestsScraper:
                 canvas_config_id=config_id,
             )
 
+            # Auto-parse syllabus for grade weights if we have text
+            if syllabus_text and syllabus_text.strip():
+                conn_inner = self._db._get_conn()
+                cursor_inner = conn_inner.execute(
+                    "SELECT id FROM courses WHERE canvas_course_id = ?", (course_id,)
+                )
+                row_inner = cursor_inner.fetchone()
+                if row_inner:
+                    db_cid = row_inner[0]
+                    if not self._db.has_grade_categories(db_cid):
+                        parsed = parse_syllabus_for_course(syllabus_text)
+                        for w in parsed["grade_weights"]:
+                            weight_num = float(w["weight"].replace("%", ""))
+                            self._db.upsert_grade_category(db_cid, w["category"], weight_num, source="auto")
+                        for s in parsed["grade_scale"]:
+                            self._db.upsert_grade_scale(db_cid, s["letter"], s["min_percent"], s.get("max_percent"))
+
             # Get assignments via API
             try:
                 assignments = self._api_get(
@@ -266,7 +284,60 @@ class CanvasRequestsScraper:
             except Exception as e:
                 logger.warning("Failed assignments for %s: %s", course_name, e)
 
-            # Get grades via API
+            # Get per-assignment grades via submissions API
+            try:
+                # Get assignment groups for category mapping
+                groups = self._api_get(
+                    session, f"{api_url}/courses/{course_id}/assignment_groups",
+                    {"include[]": "assignments", "per_page": "50"}
+                )
+                group_map = {}
+                if groups:
+                    for grp in groups:
+                        group_map[grp["id"]] = grp.get("name", "Uncategorized")
+
+                submissions = self._api_get(
+                    session,
+                    f"{api_url}/courses/{course_id}/students/submissions",
+                    {"student_ids[]": "self", "include[]": "assignment", "per_page": "100"}
+                )
+                if submissions:
+                    conn = self._db._get_conn()
+                    cursor = conn.execute(
+                        "SELECT id FROM courses WHERE canvas_course_id = ?", (course_id,)
+                    )
+                    row = cursor.fetchone()
+                    db_course_id = row[0] if row else None
+
+                    if db_course_id:
+                        for sub in submissions:
+                            assignment = sub.get("assignment")
+                            if not assignment or assignment.get("published") is False:
+                                continue
+
+                            a_name = assignment.get("name", "Untitled")
+                            points_possible = assignment.get("points_possible")
+                            group_id = assignment.get("assignment_group_id")
+                            cat_name = group_map.get(group_id, "Uncategorized") if group_id else None
+
+                            score = None
+                            if (sub.get("score") is not None
+                                    and sub.get("workflow_state") == "graded"
+                                    and sub.get("grade") is not None):
+                                score = str(sub["score"])
+
+                            self._db.upsert_grade(
+                                course_id=db_course_id,
+                                assignment_name=a_name,
+                                score=score,
+                                points_possible=str(points_possible) if points_possible else None,
+                                status="graded" if score else "pending",
+                                category=cat_name,
+                            )
+            except Exception as e:
+                logger.warning("Failed submission grades for %s: %s", course_name, e)
+
+            # Get overall grade from enrollments
             try:
                 enrollments = self._api_get(
                     session, f"{api_url}/courses/{course_id}/enrollments",
@@ -288,7 +359,7 @@ class CanvasRequestsScraper:
                                 self._db.update_course_grade(row[0], grade_str)
                             break
             except Exception as e:
-                logger.warning("Failed grades for %s: %s", course_name, e)
+                logger.warning("Failed enrollment grades for %s: %s", course_name, e)
 
         now = datetime.now(timezone.utc).isoformat()
         self._db.update_canvas_last_sync(config_id, now)
