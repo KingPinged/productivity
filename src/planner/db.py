@@ -306,6 +306,14 @@ class PlannerDB:
         )
         row = cursor.fetchone()
         if row:
+            # Check if anything actually changed before updating
+            old = conn.execute(
+                "SELECT title, description, start_time, end_time, all_day, location, event_type FROM events WHERE id=?",
+                (row[0],),
+            ).fetchone()
+            new_vals = (title, description, start_time, end_time, int(all_day), location, event_type)
+            if old and tuple(old) == new_vals:
+                return 0  # No change
             conn.execute(
                 """UPDATE events SET title=?, description=?, start_time=?, end_time=?,
                    all_day=?, location=?, event_type=?, recurring_rule=?, raw_data=?, synced_at=?

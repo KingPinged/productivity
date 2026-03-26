@@ -12,7 +12,7 @@ class ContextBuilder:
         prefs = self._db.get_all_preferences()
         events = self._db.get_events(
             start_after=date,
-            end_before=self._date_offset(date, 7),
+            end_before=self._date_offset(date, 3),
         )
         tasks = self._db.get_tasks(status="pending")
         all_blocks = self._db.get_schedule_blocks(date)
@@ -32,17 +32,17 @@ class ContextBuilder:
                     "current_grade": c["current_grade"],
                 })
 
-        # AI memories (persistent cross-session)
-        memories = self._db.get_memories(limit=20)
+        # AI memories (persistent cross-session) — limit to reduce token cost
+        memories = self._db.get_memories(limit=8)
 
-        # Recent emails (from events with source='gmail')
+        # Recent emails (from events with source='gmail') — limit to reduce token cost
         recent_emails = [
             {
                 "from": e.get("description", ""),
                 "subject": e["title"],
                 "snippet": e.get("description", "")[:200],
             }
-            for e in self._db.get_events(source="gmail")[:20]
+            for e in self._db.get_events(source="gmail")[:5]
         ]
 
         return {

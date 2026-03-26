@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import time
 
 import anthropic
@@ -18,13 +19,15 @@ BACKOFF_DELAYS = [5, 15, 60]
 class AIScheduler:
     """Core AI scheduling engine using Claude API."""
 
-    def __init__(self, db: PlannerDB, api_key: str, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, db: PlannerDB, api_key: str, model: str = "claude-haiku-4-5-20251001"):
         self._db = db
         self._api_key = api_key
         self._model = model
         self._client = anthropic.Anthropic(api_key=api_key)
         self._context_builder = ContextBuilder(db)
         self._smart_memory = None  # Set by server.py
+        self._last_smart_replan = 0.0  # Timestamp of last smart replan
+        self._api_lock = threading.Lock()  # Prevent concurrent API calls
 
     def generate(self, date: str) -> dict | None:
         """Generate a full schedule for the given date. Returns parsed result or None."""
@@ -42,51 +45,51 @@ class AIScheduler:
 
         base_prompt = build_user_prompt(context)
 
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                # Build prompt with retry prefix if needed (fresh each attempt)
-                retry_prefix = ""
-                if attempt > 0:
-                    retry_prefix = "IMPORTANT: Your previous response had issues. "
+        with self._api_lock:
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    retry_prefix = ""
+                    if attempt > 0:
+                        retry_prefix = "IMPORTANT: Your previous response had issues. "
 
-                response = self._client.messages.create(
-                    model=self._model,
-                    max_tokens=4096,
-                    system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": retry_prefix + base_prompt}],
-                )
+                    response = self._client.messages.create(
+                        model=self._model,
+                        max_tokens=4096,
+                        system=SYSTEM_PROMPT,
+                        messages=[{"role": "user", "content": retry_prefix + base_prompt}],
+                    )
 
-                raw_text = response.content[0].text
-                tokens_used = response.usage.input_tokens + response.usage.output_tokens
+                    raw_text = response.content[0].text
+                    tokens_used = response.usage.input_tokens + response.usage.output_tokens
 
-                result = self.parse_response(raw_text)
-                if result is None:
+                    result = self.parse_response(raw_text)
+                    if result is None:
+                        if attempt < MAX_RETRIES:
+                            logger.warning("Invalid JSON from Claude, retrying (%d/%d)", attempt + 1, MAX_RETRIES)
+                            continue
+                        logger.error("Failed to get valid JSON after %d attempts", MAX_RETRIES + 1)
+                        return None
+
+                    if self.has_overlaps(result["schedule"]):
+                        if attempt < MAX_RETRIES:
+                            logger.warning("Schedule has overlaps, retrying (%d/%d)", attempt + 1, MAX_RETRIES)
+                            continue
+                        logger.warning("Schedule still has overlaps after retries, accepting anyway")
+
+                    # Cache the result
+                    self._db.save_ai_cache(date, context_hash, json.dumps(result), tokens_used)
+                    return result
+
+                except anthropic.RateLimitError:
+                    delay = BACKOFF_DELAYS[min(attempt, len(BACKOFF_DELAYS) - 1)]
+                    logger.warning("Rate limited, backing off %ds", delay)
+                    time.sleep(delay)
+                except anthropic.APIError as e:
+                    logger.error("Claude API error: %s", e)
                     if attempt < MAX_RETRIES:
-                        logger.warning("Invalid JSON from Claude, retrying (%d/%d)", attempt + 1, MAX_RETRIES)
+                        time.sleep(BACKOFF_DELAYS[min(attempt, len(BACKOFF_DELAYS) - 1)])
                         continue
-                    logger.error("Failed to get valid JSON after %d attempts", MAX_RETRIES + 1)
                     return None
-
-                if self.has_overlaps(result["schedule"]):
-                    if attempt < MAX_RETRIES:
-                        logger.warning("Schedule has overlaps, retrying (%d/%d)", attempt + 1, MAX_RETRIES)
-                        continue
-                    logger.warning("Schedule still has overlaps after retries, accepting anyway")
-
-                # Cache the result
-                self._db.save_ai_cache(date, context_hash, json.dumps(result), tokens_used)
-                return result
-
-            except anthropic.RateLimitError:
-                delay = BACKOFF_DELAYS[min(attempt, len(BACKOFF_DELAYS) - 1)]
-                logger.warning("Rate limited, backing off %ds", delay)
-                time.sleep(delay)
-            except anthropic.APIError as e:
-                logger.error("Claude API error: %s", e)
-                if attempt < MAX_RETRIES:
-                    time.sleep(BACKOFF_DELAYS[min(attempt, len(BACKOFF_DELAYS) - 1)])
-                    continue
-                return None
 
         return None
 
@@ -96,46 +99,48 @@ class AIScheduler:
         context_hash = self._context_builder.compute_hash(context)
         user_prompt = build_user_prompt(context)
 
-        try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=4096,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-            raw_text = response.content[0].text
-            tokens_used = response.usage.input_tokens + response.usage.output_tokens
+        with self._api_lock:
+            try:
+                response = self._client.messages.create(
+                    model=self._model,
+                    max_tokens=4096,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                raw_text = response.content[0].text
+                tokens_used = response.usage.input_tokens + response.usage.output_tokens
 
-            result = self.parse_response(raw_text)
-            if result is None:
+                result = self.parse_response(raw_text)
+                if result is None:
+                    return None
+
+                self._db.save_ai_cache(date, context_hash, json.dumps(result), tokens_used)
+                self.store_schedule(date, result)
+
+                context = self._context_builder.build(date)
+                self._extract_and_store_memories(date, result, context.get("user_context", []))
+
+                return result
+
+            except Exception as e:
+                logger.error("Replan failed: %s", e)
                 return None
 
-            self._db.save_ai_cache(date, context_hash, json.dumps(result), tokens_used)
-            self.store_schedule(date, result)
-
-            context = self._context_builder.build(date)
-            self._extract_and_store_memories(date, result, context.get("user_context", []))
-
-            return result
-
-        except Exception as e:
-            logger.error("Replan failed: %s", e)
-            return None
-
     def generate_week(self) -> dict[str, int]:
-        """Generate schedules for the next 7 days. Returns dict of date -> block count."""
+        """Generate schedules for the next 3 days. Uses cache-aware generate() to skip unchanged days."""
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
 
         now = datetime.now(ZoneInfo("America/Chicago"))
         results = {}
 
-        for i in range(7):
+        for i in range(3):  # Only 3 days — further out changes too much to be useful
             day = now + timedelta(days=i)
             date_str = day.strftime("%Y-%m-%d")
             try:
-                result = self.replan(date_str)
+                result = self.generate(date_str)
                 if result:
+                    self.store_schedule(date_str, result)
                     count = len(result.get("schedule", []))
                     results[date_str] = count
                     logger.info("Generated schedule for %s: %d blocks", date_str, count)
@@ -148,22 +153,27 @@ class AIScheduler:
         return results
 
     def smart_replan(self) -> dict[str, int] | None:
-        """Replan today and tomorrow only (lightweight, triggered after data changes)."""
-        from datetime import datetime, timedelta
+        """Replan today only (triggered after data changes). Cooldown: max once per hour."""
+        from datetime import datetime
         from zoneinfo import ZoneInfo
 
+        # Cooldown: skip if last smart replan was less than 1 hour ago
+        now_ts = time.time()
+        if now_ts - self._last_smart_replan < 3600:
+            logger.info("Smart replan skipped — cooldown active (last: %.0fs ago)", now_ts - self._last_smart_replan)
+            return None
+        self._last_smart_replan = now_ts
+
         now = datetime.now(ZoneInfo("America/Chicago"))
+        date_str = now.strftime("%Y-%m-%d")
         results = {}
 
-        for i in range(2):  # Today + tomorrow
-            day = now + timedelta(days=i)
-            date_str = day.strftime("%Y-%m-%d")
-            try:
-                result = self.replan(date_str)
-                if result:
-                    results[date_str] = len(result.get("schedule", []))
-            except Exception as e:
-                logger.error("Smart replan failed for %s: %s", date_str, e)
+        try:
+            result = self.replan(date_str)
+            if result:
+                results[date_str] = len(result.get("schedule", []))
+        except Exception as e:
+            logger.error("Smart replan failed for %s: %s", date_str, e)
 
         return results
 

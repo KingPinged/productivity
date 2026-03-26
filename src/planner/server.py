@@ -1,9 +1,12 @@
+import fcntl
 import json as json_module
 import logging
 import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_lock_file = None  # Held for process lifetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,6 +46,20 @@ def create_app(
     static_dir: Path | None = None,
     google_client_config: dict | None = None,
 ) -> FastAPI:
+    # Prevent two instances from running simultaneously (protects API key budget)
+    global _lock_file
+    lock_path = Path(db_path).parent / "app.lock" if db_path else Path("/app/data/app.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    _lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file.write(str(os.getpid()))
+        _lock_file.flush()
+        logger.info("Acquired exclusive app lock (pid=%d)", os.getpid())
+    except (IOError, OSError):
+        logger.critical("Another instance is already running! Exiting to protect API budget.")
+        raise SystemExit(1)
+
     app = FastAPI(title="Productivity Planner")
 
     app.add_middleware(

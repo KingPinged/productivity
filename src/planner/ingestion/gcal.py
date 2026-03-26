@@ -37,8 +37,9 @@ class GCalSyncer:
             result = service.events().list(**kwargs).execute()
 
             for item in result.get("items", []):
-                self._upsert_event(account_id, calendar_id, item)
-                count += 1
+                changed = self._upsert_event(account_id, calendar_id, item)
+                if changed:
+                    count += 1
 
             page_token = result.get("nextPageToken")
             if not page_token:
@@ -46,7 +47,8 @@ class GCalSyncer:
 
         return count
 
-    def _upsert_event(self, account_id: int, calendar_id: str, item: dict) -> None:
+    def _upsert_event(self, account_id: int, calendar_id: str, item: dict) -> bool:
+        """Upsert a calendar event. Returns True if data actually changed."""
         event_id = item.get("id", "")
         external_id = f"gcal:{calendar_id}:{event_id}"
 
@@ -57,7 +59,7 @@ class GCalSyncer:
         start_time = start.get("date") or start.get("dateTime")
         end_time = end.get("date") or end.get("dateTime")
 
-        self._db.upsert_event(
+        result = self._db.upsert_event(
             account_id=account_id,
             source="gcal",
             external_id=external_id,
@@ -70,3 +72,4 @@ class GCalSyncer:
             event_type="meeting",
             raw_data=json.dumps(item),
         )
+        return result != 0  # 0 means no change

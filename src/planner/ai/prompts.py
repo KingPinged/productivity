@@ -84,7 +84,7 @@ def build_user_prompt(context: dict) -> str:
     memories = context.get("memories", [])
     if memories:
         parts.append("\n## Your Memory (things you've learned about this student):")
-        for m in memories[:15]:
+        for m in memories[:8]:
             parts.append(f"- [{m['category']}] {m['content']}")
 
     # Calendar events — note some may be optional

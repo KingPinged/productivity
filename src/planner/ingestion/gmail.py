@@ -96,14 +96,15 @@ class GmailSyncer:
         count = 0
         for msg in messages:
             meta = self.extract_metadata(msg)
-            self.store_email_event(
+            result = self.store_email_event(
                 account_id=account_id,
                 message_id=meta["message_id"],
                 subject=meta["subject"],
                 date_str=meta["date"],
                 snippet=meta["snippet"],
             )
-            count += 1
+            if result != 0:  # 0 means no change
+                count += 1
 
         now = datetime.now(timezone.utc).isoformat()
         self._db.update_account_last_sync(account_id, now)
