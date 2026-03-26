@@ -89,3 +89,34 @@ export interface Course {
   updated_at: string | null
   current_grade?: string | null
 }
+
+export interface GradeCategory {
+  name: string
+  weight: number
+  earned: number
+  possible: number
+  score: number | null
+  assignments: GradeAssignment[]
+}
+
+export interface GradeAssignment {
+  id: number | null
+  name: string
+  score: string | null
+  points_possible: string | null
+  category: string
+  hypothetical?: boolean
+}
+
+export interface GradeScaleEntry {
+  letter: string
+  minPercent: number
+  maxPercent: number | null
+}
+
+export interface GradeCalculatorData {
+  categories: GradeCategory[]
+  weightedGrade: number | null
+  letterGrade: string | null
+  gradeScale: GradeScaleEntry[]
+}
