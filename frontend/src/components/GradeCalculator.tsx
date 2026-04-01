@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useGradeCalculator } from '../hooks/useGradeCalculator'
 import type { GradeCategory, GradeAssignment } from '../types'
 
@@ -46,7 +47,7 @@ export default function GradeCalculator({ courseId }: { courseId: number }) {
             </span>
           )}
           {data.weightedGrade != null && (
-            <span className="text-2xl font-display font-bold text-primary">
+            <span className={`text-2xl font-display font-bold ${hasOverrides ? 'text-amber-700' : 'text-primary'}`}>
               {data.weightedGrade}%
             </span>
           )}
@@ -102,13 +103,17 @@ function CategorySection({
 }) {
   const [expanded, setExpanded] = useState(true)
   const [addingNew, setAddingNew] = useState(false)
+  const hasOverride = category.assignments.some(a => {
+    const key = a.id != null ? `existing-${a.id}` : `hyp-${a.name}`
+    return overrides.has(key)
+  })
 
   return (
-    <div className="mb-3 bg-sand rounded-xl overflow-hidden">
+    <div className="mb-3 bg-sand rounded-xl">
       {/* Category Header */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-3 hover:bg-border/30 transition-colors"
+        className="w-full flex items-center justify-between p-3 hover:bg-border/30 transition-colors rounded-xl"
       >
         <div className="flex items-center gap-2">
           <span className={`text-muted text-xs transition-transform ${expanded ? 'rotate-90' : ''}`}>{'\u25B6'}</span>
@@ -120,7 +125,7 @@ function CategorySection({
           )}
           <span className="text-[10px] text-muted">{category.assignments.length}</span>
         </div>
-        <span className="text-sm font-medium text-primary">
+        <span className={`text-sm font-medium ${hasOverride ? 'text-amber-700' : 'text-primary'}`}>
           {category.score != null ? `${category.score}%` : '-'}
         </span>
       </button>
@@ -180,8 +185,10 @@ function AssignmentRow({
   const hasOverride = overrides.has(key)
   const [editing, setEditing] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
+  const submitted = useRef(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -193,9 +200,7 @@ function AssignmentRow({
   // Close menu on outside click
   useEffect(() => {
     if (!showMenu) return
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false)
-    }
+    const handler = () => setShowMenu(false)
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showMenu])
@@ -203,7 +208,9 @@ function AssignmentRow({
   const scoreDisplay = assignment.score ?? '-'
   const ppDisplay = assignment.points_possible ?? '?'
 
-  const handleSubmit = (value: string) => {
+  const handleSubmit = useCallback((value: string) => {
+    if (submitted.current) return
+    submitted.current = true
     const num = parseFloat(value)
     if (!isNaN(num)) {
       onSetOverride(key, {
@@ -215,9 +222,20 @@ function AssignmentRow({
       })
     }
     setEditing(false)
+  }, [key, assignment, onSetOverride])
+
+  const startEditing = () => {
+    submitted.current = false
+    setEditing(true)
   }
 
   const otherCategories = allCategoryNames.filter(c => c !== assignment.category)
+
+  const openMenu = (e: React.MouseEvent) => {
+    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    setMenuPos({ top: rect.bottom + 2, left: rect.left })
+    setShowMenu(true)
+  }
 
   return (
     <div className={`flex items-center justify-between py-1.5 border-b border-border/30 last:border-0 ${
@@ -226,14 +244,19 @@ function AssignmentRow({
       <div className="flex items-center gap-1 flex-1 min-w-0">
         {/* Context menu trigger */}
         {assignment.id != null && (
-          <div className="relative" ref={menuRef}>
+          <>
             <button
-              onClick={() => setShowMenu(!showMenu)}
+              ref={btnRef}
+              onClick={openMenu}
               className="text-muted hover:text-secondary text-xs px-0.5 shrink-0"
               title="Move or delete"
             >{'\u22EE'}</button>
-            {showMenu && (
-              <div className="absolute left-0 top-full z-20 mt-0.5 bg-white border border-border rounded-lg shadow-lg py-1 min-w-[10rem]">
+            {showMenu && createPortal(
+              <div
+                className="fixed z-50 bg-white border border-border rounded-lg shadow-lg py-1 min-w-[10rem]"
+                style={{ top: menuPos.top, left: menuPos.left }}
+                onMouseDown={e => e.stopPropagation()}
+              >
                 {otherCategories.map(cat => (
                   <button
                     key={cat}
@@ -243,16 +266,17 @@ function AssignmentRow({
                     Move to {cat}
                   </button>
                 ))}
-                <hr className="my-1 border-border/50" />
+                {otherCategories.length > 0 && <hr className="my-1 border-border/50" />}
                 <button
                   onClick={async () => { setShowMenu(false); await onDelete(assignment.id!) }}
                   className="block w-full text-left text-xs px-3 py-1.5 hover:bg-red-50 text-red-600"
                 >
                   Delete
                 </button>
-              </div>
+              </div>,
+              document.body
             )}
-          </div>
+          </>
         )}
         <span className="text-sm text-primary truncate">{assignment.name}</span>
       </div>
@@ -261,17 +285,21 @@ function AssignmentRow({
           <input
             ref={inputRef}
             type="number"
+            step="any"
             defaultValue={assignment.score ?? ''}
             className="w-16 text-sm text-right border border-accent rounded px-1 py-0.5"
             onBlur={(e) => handleSubmit(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleSubmit((e.target as HTMLInputElement).value)
-              if (e.key === 'Escape') setEditing(false)
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                handleSubmit((e.target as HTMLInputElement).value)
+              }
+              if (e.key === 'Escape') { submitted.current = true; setEditing(false) }
             }}
           />
         ) : (
           <button
-            onClick={() => setEditing(true)}
+            onClick={startEditing}
             className={`text-sm font-medium text-right min-w-[3rem] ${
               assignment.score ? 'text-primary' : 'text-muted border-b border-dashed border-muted'
             } ${hasOverride ? 'text-amber-700 font-semibold' : ''} hover:text-accent cursor-pointer`}

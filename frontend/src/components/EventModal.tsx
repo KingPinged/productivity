@@ -57,6 +57,7 @@ export default function EventModal({ mode, event, defaultStart, defaultEnd, onCl
   const [startTime, setStartTime] = useState(formatTimeForInput(event?.start_time || defaultStart))
   const [endTime, setEndTime] = useState(formatTimeForInput(event?.end_time || defaultEnd))
   const [eventType, setEventType] = useState(event?.event_type || 'personal')
+  const [description, setDescription] = useState(event?.description || '')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -75,6 +76,7 @@ export default function EventModal({ mode, event, defaultStart, defaultEnd, onCl
             start_time: startISO,
             end_time: endISO,
             event_type: eventType,
+            description: description.trim() || undefined,
           }),
         })
       } else if (event) {
@@ -85,6 +87,7 @@ export default function EventModal({ mode, event, defaultStart, defaultEnd, onCl
             start_time: startISO,
             end_time: endISO,
             event_type: eventType,
+            description: description.trim() || undefined,
           }),
         })
       }
@@ -192,6 +195,26 @@ export default function EventModal({ mode, event, defaultStart, defaultEnd, onCl
               ))}
             </div>
           </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-xs text-secondary font-medium mb-1">Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What this event entails..."
+              rows={3}
+              className="w-full bg-cream border border-border rounded-xl px-3 py-2.5 text-primary text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 focus:outline-none resize-none"
+            />
+          </div>
+
+          {/* Show existing description (read-only for synced events) */}
+          {mode === 'edit' && event?.description && event.source !== 'manual' && (
+            <div className="p-3 bg-cream rounded-lg">
+              <label className="block text-xs text-secondary font-medium mb-1">Details</label>
+              <p className="text-sm text-primary whitespace-pre-wrap">{event.description}</p>
+            </div>
+          )}
         </div>
 
         {/* Actions */}

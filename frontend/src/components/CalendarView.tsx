@@ -64,12 +64,16 @@ function useWeekSchedule() {
   const load = useCallback(async () => {
     try {
       const today = new Date()
+      // Get start of current week (Sunday) so past days' blocks are visible
+      const dayOfWeek = today.getDay()
+      const weekStart = new Date(today)
+      weekStart.setDate(weekStart.getDate() - dayOfWeek)
+
       const allBlocks: ScheduleBlock[] = []
       for (let i = 0; i < 7; i++) {
-        const d = new Date(today)
+        const d = new Date(weekStart)
         d.setDate(d.getDate() + i)
         const dateStr = d.toISOString().split('T')[0]
-        const { apiFetch } = await import('../api/client')
         const data = await apiFetch<{ blocks: ScheduleBlock[] }>(`/api/schedule/${dateStr}`)
         allBlocks.push(...data.blocks)
       }
