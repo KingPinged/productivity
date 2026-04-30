@@ -30,12 +30,54 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-# Shared state directory
-_APP_DATA_DIR = Path.home() / "Library" / "Application Support" / "ProductivityTimer"
+# Shared state directory.  When launched by the system launchd
+# daemon (root), the plist sets PRODUCTIVITY_TIMER_DATA_DIR so the
+# daemon points at the user's home dir instead of /var/root.
+_data_dir_env = os.environ.get("PRODUCTIVITY_TIMER_DATA_DIR")
+_APP_DATA_DIR = (
+    Path(_data_dir_env)
+    if _data_dir_env
+    else Path.home() / "Library" / "Application Support" / "ProductivityTimer"
+)
 _DNS_STATE_FILE = _APP_DATA_DIR / "dns_proxy_state.json"
 _DNS_ORIGINAL_FILE = _APP_DATA_DIR / "dns_original_settings.json"
 _DNS_PID_FILE = _APP_DATA_DIR / "dns_proxy.pid"
 _DNS_LOG_FILE = _APP_DATA_DIR / "dns_proxy.log"
+
+# launchd integration — running the proxy as a system daemon means we
+# only ask for admin once (at install time) and the proxy survives
+# crashes/reboots without re-prompting.
+_LAUNCHD_LABEL = "com.productivity.dnsproxy"
+_LAUNCHD_PLIST_PATH = Path("/Library/LaunchDaemons") / f"{_LAUNCHD_LABEL}.plist"
+_LAUNCHD_LOG_PATH = Path("/var/log/productivity-dnsproxy.log")
+_LAUNCHD_ERR_PATH = Path("/var/log/productivity-dnsproxy.err")
+# Daemon script gets copied here at install time. macOS TCC blocks
+# root processes from reading files inside ~/Documents (and other
+# protected zones), so we can't point launchd directly at the source
+# tree — we stage a copy in a non-protected system path.
+_LAUNCHD_SCRIPT_PATH = Path("/Library/Application Support/com.productivity.dnsproxy/dns_proxy.py")
+
+# PF (Packet Filter) integration — forces ALL outbound DNS through
+# the local proxy regardless of what an app or VPN is configured
+# to use.  Defeats most "DNS over HTTPS off-by-default" leaks; loses
+# to system extensions that intercept at the socket layer (Cisco
+# AnyConnect, etc.) but still helps for direct VPN tunnels.
+_PF_ANCHOR_NAME = "com.productivity.dnsproxy"
+_PF_ANCHOR_PATH = Path("/etc/pf.anchors") / _PF_ANCHOR_NAME
+_PF_CONF_PATH = Path("/etc/pf.conf")
+_PF_MARKER_START = "# PRODUCTIVITY_TIMER_DNSPROXY_ANCHOR_START"
+_PF_MARKER_END = "# PRODUCTIVITY_TIMER_DNSPROXY_ANCHOR_END"
+
+# Per-domain DNS routing via /etc/resolver/<domain>.  macOS reads
+# these files in libsystem (configd → mDNSResponder), BEFORE any
+# Network Extension or VPN tunnel gets a chance to intercept.  A
+# file containing `nameserver 127.0.0.1` for a blocked domain
+# routes ALL resolution of that domain (and its subdomains)
+# through the local DNS proxy, which returns 0.0.0.0 → blocked.
+# Survives reboots automatically (configd reads /etc/resolver/ at
+# boot).  Bullet-proof against Surfshark + Cisco AnyConnect.
+_RESOLVER_DIR = Path("/etc/resolver")
+_RESOLVER_MANIFEST = _RESOLVER_DIR / ".productivity-timer-manifest"
 
 # Upstream DNS servers (used for forwarding allowed queries)
 UPSTREAM_DNS = ["1.1.1.1", "8.8.8.8"]
@@ -411,6 +453,575 @@ def _run_with_admin(command: str) -> subprocess.CompletedProcess:
     )
 
 
+# ── launchd LaunchDaemon integration ────────────────────────────────
+
+def _build_launchd_plist(python_exec: str, proxy_script: str, data_dir: str) -> str:
+    """Build the LaunchDaemon plist XML for the DNS proxy."""
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0">\n'
+        '<dict>\n'
+        f'    <key>Label</key>\n    <string>{_LAUNCHD_LABEL}</string>\n'
+        '    <key>ProgramArguments</key>\n    <array>\n'
+        f'        <string>{python_exec}</string>\n'
+        f'        <string>{proxy_script}</string>\n'
+        '        <string>--run-proxy</string>\n'
+        '    </array>\n'
+        '    <key>EnvironmentVariables</key>\n    <dict>\n'
+        '        <key>PRODUCTIVITY_TIMER_DATA_DIR</key>\n'
+        f'        <string>{data_dir}</string>\n'
+        '    </dict>\n'
+        '    <key>RunAtLoad</key>\n    <true/>\n'
+        '    <key>KeepAlive</key>\n    <true/>\n'
+        f'    <key>StandardOutPath</key>\n    <string>{_LAUNCHD_LOG_PATH}</string>\n'
+        f'    <key>StandardErrorPath</key>\n    <string>{_LAUNCHD_ERR_PATH}</string>\n'
+        '    <key>ThrottleInterval</key>\n    <integer>10</integer>\n'
+        '</dict>\n</plist>\n'
+    )
+
+
+def is_launchd_plist_installed() -> bool:
+    """True iff the LaunchDaemon plist exists on disk."""
+    return _LAUNCHD_PLIST_PATH.exists()
+
+
+def is_launchd_proxy_loaded() -> bool:
+    """True iff launchctl knows about the daemon (loaded into the system domain)."""
+    try:
+        result = subprocess.run(
+            ["launchctl", "print", f"system/{_LAUNCHD_LABEL}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, Exception):
+        return False
+
+
+def install_launchd_proxy() -> Tuple[bool, str]:
+    """Install the LaunchDaemon plist and bootstrap it.
+
+    Single osascript admin prompt covers: stage the proxy script in a
+    non-TCC-protected location, copy plist into /Library/LaunchDaemons,
+    fix ownership/perms, bootstrap + enable + kickstart, and create
+    log files.
+
+    Why we copy the script: macOS TCC blocks root daemons from
+    reading files in protected user zones (Documents, Desktop,
+    Downloads, iCloud).  Pointing launchd at the source tree fails
+    with "Operation not permitted" until Full Disk Access is granted
+    for the python interpreter.  Staging a copy under
+    /Library/Application Support sidesteps the prompt entirely.
+    """
+    import tempfile
+
+    python_exec = sys.executable
+    src_script = Path(__file__).resolve()
+    staged_script = str(_LAUNCHD_SCRIPT_PATH)
+    data_dir = str(_APP_DATA_DIR)
+
+    plist_xml = _build_launchd_plist(python_exec, staged_script, data_dir)
+
+    # Stage the script via /tmp so the admin `cp` is reading from a
+    # non-TCC-protected path. macOS blocks even root processes from
+    # reading inside ~/Documents without Full Disk Access; reading
+    # the source as the user (no TCC restriction on self-owned files)
+    # and writing into /tmp dodges that.
+    try:
+        script_bytes = src_script.read_bytes()
+    except OSError as e:
+        return False, f"Failed to read source script: {e}"
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.plist', delete=False, encoding='utf-8', dir='/tmp',
+        ) as tmp:
+            tmp.write(plist_xml)
+            tmp_plist = tmp.name
+        with tempfile.NamedTemporaryFile(
+            mode='wb', suffix='.py', delete=False, dir='/tmp',
+        ) as tmp:
+            tmp.write(script_bytes)
+            tmp_script = tmp.name
+    except OSError as e:
+        return False, f"Failed to stage files: {e}"
+
+    plist_target = shlex.quote(str(_LAUNCHD_PLIST_PATH))
+    script_target = shlex.quote(staged_script)
+    script_dir = shlex.quote(str(_LAUNCHD_SCRIPT_PATH.parent))
+    label = shlex.quote(f"system/{_LAUNCHD_LABEL}")
+
+    cmd = " && ".join([
+        f"mkdir -p {script_dir}",
+        f"cp {shlex.quote(tmp_script)} {script_target}",
+        f"chown root:wheel {script_target}",
+        f"chmod 0755 {script_target}",
+        f"cp {shlex.quote(tmp_plist)} {plist_target}",
+        f"chown root:wheel {plist_target}",
+        f"chmod 0644 {plist_target}",
+        f"touch {shlex.quote(str(_LAUNCHD_LOG_PATH))} {shlex.quote(str(_LAUNCHD_ERR_PATH))}",
+        # bootout if a previous version is loaded so bootstrap doesn't fail
+        f"launchctl bootout {label} 2>/dev/null; true",
+        f"launchctl bootstrap system {plist_target}",
+        f"launchctl enable {label}",
+        f"launchctl kickstart -k {label}",
+        f"rm -f {shlex.quote(tmp_plist)} {shlex.quote(tmp_script)}",
+    ])
+    result = _run_with_admin(cmd)
+    if result.returncode != 0:
+        return False, f"Install failed: {result.stderr.strip() or result.stdout.strip()}"
+    return True, f"Installed {_LAUNCHD_PLIST_PATH} (script staged at {_LAUNCHD_SCRIPT_PATH})"
+
+
+def uninstall_launchd_proxy() -> Tuple[bool, str]:
+    """Bootout the daemon, delete the plist + staged script (one prompt)."""
+    plist_target = shlex.quote(str(_LAUNCHD_PLIST_PATH))
+    script_target = shlex.quote(str(_LAUNCHD_SCRIPT_PATH))
+    script_dir = shlex.quote(str(_LAUNCHD_SCRIPT_PATH.parent))
+    label = shlex.quote(f"system/{_LAUNCHD_LABEL}")
+    cmd = " ; ".join([
+        f"launchctl bootout {label} 2>/dev/null; true",
+        f"rm -f {plist_target}",
+        f"rm -f {script_target}",
+        f"rmdir {script_dir} 2>/dev/null; true",
+    ])
+    result = _run_with_admin(cmd)
+    if result.returncode != 0:
+        return False, f"Uninstall failed: {result.stderr.strip() or result.stdout.strip()}"
+    return True, "Uninstalled"
+
+
+# ── PF (Packet Filter) DNS redirect ────────────────────────────────
+
+def _build_pf_anchor() -> str:
+    """Generate PF anchor rules for transparent DNS redirect.
+
+    Caveat — macOS PF limitation:
+      On macOS, `rdr` only intercepts packets that transit through
+      the host's PF layer.  Locally-originated outbound DNS from
+      user processes is hooked at the socket layer (BSD-side) and
+      doesn't traverse rdr.  The OpenBSD escape hatch — filter-
+      side `pass out ... route-to (lo0 127.0.0.1)` — is a syntax
+      error on macOS PF (Apple's PF fork pre-dates route-to in
+      user anchors).
+      As a result this anchor only blocks DNS *forwarded through*
+      this Mac (e.g. acting as a router or hotspot) — useful in
+      that niche but a no-op for the common client-side case.
+      Disable the relevant Network Extensions (Cisco AnyConnect
+      socket filter, VPN packet tunnel) if you need /etc/hosts to
+      apply system-wide.
+    """
+    upstream_list = ", ".join(UPSTREAM_DNS)
+    return (
+        "# Productivity Timer — DNS rdr (transit-only).\n"
+        "# Limitation: macOS PF rdr does not catch locally-originated\n"
+        "# DNS traffic; this anchor only intercepts forwarded DNS\n"
+        "# (this Mac as a router/hotspot).  See _build_pf_anchor doc.\n"
+        "\n"
+        f"table <productivity_upstream_dns> persist {{ {upstream_list} }}\n"
+        "\n"
+        "no rdr proto { tcp, udp } from any to <productivity_upstream_dns> port 53\n"
+        "no rdr proto { tcp, udp } from any to 127.0.0.1 port 53\n"
+        "rdr pass inet proto udp from any to any port 53 -> 127.0.0.1 port 53\n"
+        "rdr pass inet proto tcp from any to any port 53 -> 127.0.0.1 port 53\n"
+    )
+
+
+def _pf_conf_with_marker_block(current: str, snippet: str) -> str:
+    """Insert (or replace) our marker block in pf.conf at the right spot.
+
+    PF requires rules in a strict order: options → normalization →
+    queueing → translation (rdr/nat) → filtering.  Our `rdr-anchor`
+    + `load anchor` lines must land in the translation section,
+    BEFORE any `anchor` (filter) declaration.  We insert immediately
+    after the last existing `rdr-anchor` line, falling back to just
+    before the first filter `anchor` line, falling back to append.
+    """
+    lines = current.split("\n")
+    out = []
+    in_block = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == _PF_MARKER_START:
+            in_block = True
+            continue
+        if stripped == _PF_MARKER_END:
+            in_block = False
+            continue
+        if not in_block:
+            out.append(line)
+
+    if not snippet.strip():
+        return "\n".join(out).rstrip() + "\n"
+
+    insert_at = None
+    last_rdr_anchor = None
+    first_filter_anchor = None
+    for i, line in enumerate(out):
+        bare = line.lstrip()
+        if bare.startswith("rdr-anchor") or bare.startswith("nat-anchor"):
+            last_rdr_anchor = i
+        # `anchor "name"` at top-level (not nat-/rdr-/scrub-/load anchor)
+        # is the filter-anchor declaration.  load-anchor is a parser
+        # directive and doesn't define a filter slot.
+        if bare.startswith("anchor ") and first_filter_anchor is None:
+            first_filter_anchor = i
+
+    if last_rdr_anchor is not None:
+        insert_at = last_rdr_anchor + 1
+    elif first_filter_anchor is not None:
+        insert_at = first_filter_anchor
+    else:
+        insert_at = len(out)
+
+    snippet_lines = snippet.strip().split("\n")
+    new_lines = out[:insert_at] + snippet_lines + out[insert_at:]
+    return "\n".join(new_lines).rstrip() + "\n"
+
+
+def is_pf_redirect_installed() -> bool:
+    """True iff anchor file exists AND pf.conf references it."""
+    try:
+        if not _PF_ANCHOR_PATH.exists():
+            return False
+        return _PF_MARKER_START in _PF_CONF_PATH.read_text()
+    except OSError:
+        return False
+
+
+def is_pf_redirect_loaded() -> bool:
+    """True iff pfctl reports our anchor's rdr rules are active.
+
+    Requires root to query, so this only succeeds when run from
+    a privileged context.  From the user's app it's still useful
+    via osascript-shell admin, but here we just try without and
+    return False on permission denied.
+    """
+    try:
+        result = subprocess.run(
+            ["pfctl", "-s", "nat", "-a", _PF_ANCHOR_NAME],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.returncode == 0 and "127.0.0.1" in result.stdout
+    except Exception:
+        return False
+
+
+def install_pf_redirect() -> Tuple[bool, str]:
+    """Install the PF anchor + reference in /etc/pf.conf, reload PF.
+
+    Single osascript admin prompt covers everything.  Persistent
+    across reboots because /etc/pf.conf is loaded automatically by
+    launchd's com.apple.pfctl service.
+    """
+    import tempfile
+
+    anchor_content = _build_pf_anchor()
+
+    try:
+        current_pf = _PF_CONF_PATH.read_text()
+    except OSError as e:
+        return False, f"Failed to read /etc/pf.conf: {e}"
+
+    # rdr-anchor only (no filter anchor) — see _build_pf_anchor for
+    # why filter rules can't carry their weight on macOS PF.
+    snippet = (
+        f"{_PF_MARKER_START}\n"
+        f'rdr-anchor "{_PF_ANCHOR_NAME}"\n'
+        f'load anchor "{_PF_ANCHOR_NAME}" from "{_PF_ANCHOR_PATH}"\n'
+        f"{_PF_MARKER_END}"
+    )
+    new_pf = _pf_conf_with_marker_block(current_pf, snippet)
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.pf', delete=False, dir='/tmp', encoding='utf-8',
+        ) as tmp:
+            tmp.write(anchor_content)
+            tmp_anchor = tmp.name
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.pf.conf', delete=False, dir='/tmp', encoding='utf-8',
+        ) as tmp:
+            tmp.write(new_pf)
+            tmp_pfconf = tmp.name
+    except OSError as e:
+        return False, f"Failed to stage PF files: {e}"
+
+    anchor_target = shlex.quote(str(_PF_ANCHOR_PATH))
+    pfconf_target = shlex.quote(str(_PF_CONF_PATH))
+    cmd = " && ".join([
+        f"cp {shlex.quote(tmp_anchor)} {anchor_target}",
+        f"chown root:wheel {anchor_target}",
+        f"chmod 0644 {anchor_target}",
+        f"cp {shlex.quote(tmp_pfconf)} {pfconf_target}",
+        f"chown root:wheel {pfconf_target}",
+        f"chmod 0644 {pfconf_target}",
+        # First-time enable is idempotent. Suppress noise from already-on.
+        "pfctl -E 2>/dev/null; true",
+        # Reload main ruleset so anchor reference picks up.
+        f"pfctl -f {pfconf_target}",
+        f"rm -f {shlex.quote(tmp_anchor)} {shlex.quote(tmp_pfconf)}",
+    ])
+    result = _run_with_admin(cmd)
+    if result.returncode != 0:
+        return False, f"PF install failed: {result.stderr.strip() or result.stdout.strip()}"
+    return True, f"Installed PF anchor at {_PF_ANCHOR_PATH}"
+
+
+def _resolver_base_domains(sites: Set[str]) -> Set[str]:
+    """Reduce a site list to /etc/resolver/ base domains.
+
+    /etc/resolver/<domain> applies to <domain> AND all subdomains
+    (configd reads it for the longest-suffix-match), so explicit
+    `www.` variants are redundant — drop them.  Also reject any
+    obviously-malformed entry to keep filename writes safe.
+    """
+    out: Set[str] = set()
+    for s in sites:
+        s = (s or "").strip().lower()
+        if not s:
+            continue
+        if s.startswith("www."):
+            s = s[4:]
+        # Filename safety: only normal hostname chars allowed.
+        if any(ch in s for ch in "/\\\n\r\0 \t"):
+            continue
+        if ".." in s:
+            continue
+        out.add(s)
+    return out
+
+
+def is_resolver_redirect_installed() -> bool:
+    """True iff the resolver manifest exists (we've installed before)."""
+    try:
+        return _RESOLVER_MANIFEST.exists()
+    except OSError:
+        return False
+
+
+def install_resolver_redirect(sites: Set[str]) -> Tuple[bool, str]:
+    """Install /etc/resolver/<domain> entries pointing at the local proxy.
+
+    One file per blocked domain, each containing:
+
+        nameserver 127.0.0.1
+
+    A manifest file lists every entry we created, so uninstall
+    only removes our files (never disturbs unrelated /etc/resolver/
+    entries from other tools).
+
+    Single osascript admin prompt creates the whole set + flushes
+    the resolver cache.
+    """
+    import tempfile
+
+    domains = _resolver_base_domains(sites)
+    if not domains:
+        return False, "no domains to install"
+
+    # Build an installer shell script — too many domains for a
+    # one-line command, so stage in /tmp and exec via admin.
+    sorted_domains = sorted(domains)
+    script_parts = [
+        "#!/bin/bash",
+        "set -eu",
+        f"mkdir -p {shlex.quote(str(_RESOLVER_DIR))}",
+    ]
+    for d in sorted_domains:
+        target = shlex.quote(str(_RESOLVER_DIR / d))
+        script_parts.append(f"printf 'nameserver 127.0.0.1\\n' > {target}")
+        script_parts.append(f"chmod 0644 {target}")
+    # Manifest with one domain per line — used by uninstall.
+    manifest_content = "\n".join(sorted_domains) + "\n"
+    # Ship the manifest via heredoc to avoid a separate file copy.
+    script_parts.append(
+        f"cat > {shlex.quote(str(_RESOLVER_MANIFEST))} <<'PRODUCTIVITY_MANIFEST_EOF'\n"
+        f"{manifest_content}"
+        f"PRODUCTIVITY_MANIFEST_EOF"
+    )
+    script_parts.append(f"chmod 0644 {shlex.quote(str(_RESOLVER_MANIFEST))}")
+    script_parts.append("dscacheutil -flushcache")
+    script_parts.append("killall -HUP mDNSResponder 2>/dev/null || true")
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.sh', delete=False, dir='/tmp', encoding='utf-8',
+        ) as tmp:
+            tmp.write("\n".join(script_parts) + "\n")
+            tmp_script = tmp.name
+        os.chmod(tmp_script, 0o755)
+    except OSError as e:
+        return False, f"Failed to stage installer: {e}"
+
+    cmd = (
+        f"bash {shlex.quote(tmp_script)} && "
+        f"rm -f {shlex.quote(tmp_script)}"
+    )
+    result = _run_with_admin(cmd)
+    if result.returncode != 0:
+        return False, f"Resolver install failed: {result.stderr.strip() or result.stdout.strip()}"
+    return True, f"Installed {len(domains)} /etc/resolver/ files"
+
+
+def update_resolver_redirect(sites: Set[str]) -> Tuple[bool, str]:
+    """Reconcile /etc/resolver/ files with the current `sites` set.
+
+    Same single-prompt flow as install, but only writes the diff:
+    creates files for newly-added domains, removes files for
+    domains no longer in the set, refreshes the manifest.  No-ops
+    when the on-disk manifest already matches.
+    """
+    desired = _resolver_base_domains(sites)
+    if not desired:
+        # Nothing to install — fall through to uninstall path.
+        return uninstall_resolver_redirect()
+
+    if not is_resolver_redirect_installed():
+        return install_resolver_redirect(sites)
+
+    try:
+        existing = set(
+            line.strip() for line in _RESOLVER_MANIFEST.read_text().splitlines()
+            if line.strip()
+        )
+    except OSError as e:
+        # Manifest unreadable — fall back to full reinstall.
+        return install_resolver_redirect(sites)
+
+    if existing == desired:
+        return True, f"Already in sync ({len(desired)} domains)"
+
+    to_add = sorted(desired - existing)
+    to_remove = sorted(existing - desired)
+
+    import tempfile
+    script_parts = [
+        "#!/bin/bash",
+        "set -eu",
+        f"mkdir -p {shlex.quote(str(_RESOLVER_DIR))}",
+    ]
+    for d in to_add:
+        target = shlex.quote(str(_RESOLVER_DIR / d))
+        script_parts.append(f"printf 'nameserver 127.0.0.1\\n' > {target}")
+        script_parts.append(f"chmod 0644 {target}")
+    for d in to_remove:
+        target = shlex.quote(str(_RESOLVER_DIR / d))
+        script_parts.append(f"rm -f {target}")
+    manifest_content = "\n".join(sorted(desired)) + "\n"
+    script_parts.append(
+        f"cat > {shlex.quote(str(_RESOLVER_MANIFEST))} <<'PRODUCTIVITY_MANIFEST_EOF'\n"
+        f"{manifest_content}"
+        f"PRODUCTIVITY_MANIFEST_EOF"
+    )
+    script_parts.append(f"chmod 0644 {shlex.quote(str(_RESOLVER_MANIFEST))}")
+    script_parts.append("dscacheutil -flushcache")
+    script_parts.append("killall -HUP mDNSResponder 2>/dev/null || true")
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.sh', delete=False, dir='/tmp', encoding='utf-8',
+        ) as tmp:
+            tmp.write("\n".join(script_parts) + "\n")
+            tmp_script = tmp.name
+        os.chmod(tmp_script, 0o755)
+    except OSError as e:
+        return False, f"Failed to stage updater: {e}"
+
+    cmd = (
+        f"bash {shlex.quote(tmp_script)} && "
+        f"rm -f {shlex.quote(tmp_script)}"
+    )
+    result = _run_with_admin(cmd)
+    if result.returncode != 0:
+        return False, f"Resolver update failed: {result.stderr.strip() or result.stdout.strip()}"
+    return True, f"Updated resolver: +{len(to_add)} -{len(to_remove)}"
+
+
+def uninstall_resolver_redirect() -> Tuple[bool, str]:
+    """Remove every /etc/resolver/ file we created (per the manifest)."""
+    if not is_resolver_redirect_installed():
+        return True, "not installed"
+
+    try:
+        domains = [
+            line.strip()
+            for line in _RESOLVER_MANIFEST.read_text().splitlines()
+            if line.strip()
+        ]
+    except OSError as e:
+        return False, f"Failed to read manifest: {e}"
+
+    script_parts = ["#!/bin/bash", "set -eu"]
+    for d in domains:
+        if any(ch in d for ch in "/\\\n\r\0 \t") or ".." in d:
+            continue
+        script_parts.append(f"rm -f {shlex.quote(str(_RESOLVER_DIR / d))}")
+    script_parts.append(f"rm -f {shlex.quote(str(_RESOLVER_MANIFEST))}")
+    script_parts.append("dscacheutil -flushcache")
+    script_parts.append("killall -HUP mDNSResponder 2>/dev/null || true")
+
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.sh', delete=False, dir='/tmp', encoding='utf-8',
+        ) as tmp:
+            tmp.write("\n".join(script_parts) + "\n")
+            tmp_script = tmp.name
+        os.chmod(tmp_script, 0o755)
+    except OSError as e:
+        return False, f"Failed to stage uninstaller: {e}"
+
+    cmd = (
+        f"bash {shlex.quote(tmp_script)} && "
+        f"rm -f {shlex.quote(tmp_script)}"
+    )
+    result = _run_with_admin(cmd)
+    if result.returncode != 0:
+        return False, f"Resolver uninstall failed: {result.stderr.strip() or result.stdout.strip()}"
+    return True, f"Uninstalled {len(domains)} resolver files"
+
+
+def uninstall_pf_redirect() -> Tuple[bool, str]:
+    """Remove PF anchor + pf.conf reference, flush our anchor's rules."""
+    import tempfile
+
+    try:
+        current_pf = _PF_CONF_PATH.read_text()
+    except OSError as e:
+        return False, f"Failed to read /etc/pf.conf: {e}"
+
+    new_pf = _pf_conf_with_marker_block(current_pf, "").rstrip() + "\n"
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.pf.conf', delete=False, dir='/tmp', encoding='utf-8',
+        ) as tmp:
+            tmp.write(new_pf)
+            tmp_pfconf = tmp.name
+    except OSError as e:
+        return False, f"Failed to stage pf.conf: {e}"
+
+    pfconf_target = shlex.quote(str(_PF_CONF_PATH))
+    anchor_target = shlex.quote(str(_PF_ANCHOR_PATH))
+    label = shlex.quote(_PF_ANCHOR_NAME)
+    cmd = " && ".join([
+        f"cp {shlex.quote(tmp_pfconf)} {pfconf_target}",
+        f"chown root:wheel {pfconf_target}",
+        f"chmod 0644 {pfconf_target}",
+        f"rm -f {anchor_target}",
+        # Flush our anchor's rdr table; ignore failure if anchor empty.
+        f"pfctl -a {label} -F nat 2>/dev/null; true",
+        f"pfctl -f {pfconf_target}",
+        f"rm -f {shlex.quote(tmp_pfconf)}",
+    ])
+    result = _run_with_admin(cmd)
+    if result.returncode != 0:
+        return False, f"PF uninstall failed: {result.stderr.strip() or result.stdout.strip()}"
+    return True, "Uninstalled PF redirect"
+
+
 def _get_network_services() -> List[str]:
     """Get all active network service names."""
     try:
@@ -591,6 +1202,19 @@ class DNSProxy:
         # Step 2: Write initial state for proxy to read
         self._flush_state()
 
+        # If a LaunchDaemon is managing the proxy we don't need to
+        # spawn or kill anything — just verify it's listening, then
+        # configure system DNS.  No osascript prompt on this path.
+        if is_launchd_plist_installed() and is_launchd_proxy_loaded():
+            if self._wait_for_proxy(timeout=3.0):
+                if not self._dns_config.set_proxy_dns():
+                    print("[DNS] launchd proxy up but DNS config failed — aborting")
+                    return False
+                self._running = True
+                print("[DNS] Using launchd-managed proxy")
+                return True
+            print("[DNS] launchd plist installed but proxy not responding — falling back")
+
         # Step 3: Kill any stale proxy process
         self._kill_stale_proxy()
 
@@ -627,7 +1251,12 @@ class DNSProxy:
         return True
 
     def stop(self) -> None:
-        """Stop the DNS proxy and restore original DNS settings."""
+        """Stop the DNS proxy and restore original DNS settings.
+
+        Leaves the LaunchDaemon alone if one is installed — it's
+        meant to outlive individual app sessions.  Use
+        ``uninstall_launchd_proxy()`` to remove the daemon itself.
+        """
         if not self._running:
             return
 
@@ -636,8 +1265,9 @@ class DNSProxy:
         # Step 1: Restore DNS FIRST (so internet works immediately)
         self._dns_config.restore_original_dns()
 
-        # Step 2: Kill proxy subprocess
-        self._kill_stale_proxy()
+        # Step 2: Kill proxy subprocess only if we own it
+        if not is_launchd_plist_installed():
+            self._kill_stale_proxy()
 
         # Clean up state file
         try:
@@ -799,8 +1429,108 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-proxy", action="store_true",
-                        help="Run the DNS proxy server")
+                        help="Run the DNS proxy server (subprocess entry point)")
+    parser.add_argument("--install-daemon", action="store_true",
+                        help="Install LaunchDaemon so the proxy runs at boot")
+    parser.add_argument("--uninstall-daemon", action="store_true",
+                        help="Remove the LaunchDaemon plist and stop the proxy")
+    parser.add_argument("--daemon-status", action="store_true",
+                        help="Print whether the LaunchDaemon is installed and loaded")
+    parser.add_argument("--install-pf", action="store_true",
+                        help="Install PF anchor that redirects all DNS to local proxy")
+    parser.add_argument("--uninstall-pf", action="store_true",
+                        help="Remove PF anchor + pf.conf reference")
+    parser.add_argument("--pf-status", action="store_true",
+                        help="Print PF redirect install/loaded state")
+    parser.add_argument("--install-resolver", action="store_true",
+                        help="Install /etc/resolver/<domain> per blocked site (works through VPN)")
+    parser.add_argument("--update-resolver", action="store_true",
+                        help="Sync /etc/resolver/ files with the current ADULT_SITES set")
+    parser.add_argument("--uninstall-resolver", action="store_true",
+                        help="Remove all /etc/resolver/ files we installed")
+    parser.add_argument("--resolver-status", action="store_true",
+                        help="Print whether resolver redirect is installed")
     args = parser.parse_args()
 
     if args.run_proxy:
         _run_dns_proxy()
+        sys.exit(0)
+
+    if args.daemon_status:
+        installed = is_launchd_plist_installed()
+        loaded = is_launchd_proxy_loaded() if installed else False
+        print(f"plist installed: {installed} ({_LAUNCHD_PLIST_PATH})")
+        print(f"loaded:          {loaded}")
+        if installed:
+            try:
+                out = subprocess.run(
+                    ["launchctl", "print", f"system/{_LAUNCHD_LABEL}"],
+                    capture_output=True, text=True, timeout=5,
+                ).stdout
+                for line in out.splitlines():
+                    if "state" in line or "pid" in line or "last exit" in line.lower():
+                        print(f"  {line.strip()}")
+            except Exception:
+                pass
+        sys.exit(0 if (installed and loaded) else 1)
+
+    if args.install_daemon:
+        ok, msg = install_launchd_proxy()
+        print(msg)
+        sys.exit(0 if ok else 1)
+
+    if args.uninstall_daemon:
+        ok, msg = uninstall_launchd_proxy()
+        print(msg)
+        sys.exit(0 if ok else 1)
+
+    if args.pf_status:
+        installed = is_pf_redirect_installed()
+        loaded = is_pf_redirect_loaded() if installed else False
+        print(f"anchor file:     {installed} ({_PF_ANCHOR_PATH})")
+        print(f"pf.conf marker:  {installed}")
+        print(f"rules loaded:    {loaded}  (requires root to verify)")
+        sys.exit(0 if (installed and loaded) else 1)
+
+    if args.install_pf:
+        ok, msg = install_pf_redirect()
+        print(msg)
+        sys.exit(0 if ok else 1)
+
+    if args.uninstall_pf:
+        ok, msg = uninstall_pf_redirect()
+        print(msg)
+        sys.exit(0 if ok else 1)
+
+    if args.resolver_status:
+        installed = is_resolver_redirect_installed()
+        print(f"manifest:        {installed} ({_RESOLVER_MANIFEST})")
+        if installed:
+            try:
+                domains = [
+                    l.strip() for l in _RESOLVER_MANIFEST.read_text().splitlines()
+                    if l.strip()
+                ]
+                print(f"domains tracked: {len(domains)}")
+            except OSError:
+                pass
+        sys.exit(0 if installed else 1)
+
+    if args.install_resolver or args.update_resolver:
+        # Lazy import: only needed when running from project root
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+        from src.data.default_blocklists import get_adult_sites
+        sites = get_adult_sites()
+        if args.update_resolver:
+            ok, msg = update_resolver_redirect(sites)
+        else:
+            ok, msg = install_resolver_redirect(sites)
+        print(msg)
+        sys.exit(0 if ok else 1)
+
+    if args.uninstall_resolver:
+        ok, msg = uninstall_resolver_redirect()
+        print(msg)
+        sys.exit(0 if ok else 1)
+
+    parser.print_help()

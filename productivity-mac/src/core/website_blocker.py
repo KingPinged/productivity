@@ -110,11 +110,14 @@ class WebsiteBlocker:
                     continue
 
                 # Add entry - 0.0.0.0 is faster and more effective than 127.0.0.1
-                block_entries.append(f"0.0.0.0 {site}")
+                # Use 127.0.0.1 (not 0.0.0.0) — macOS getaddrinfo
+                # filters 0.0.0.0 entries and falls through to DNS,
+                # making them useless. 127.0.0.1 redirects the
+                # connection to localhost where ports 80/443 refuse.
+                block_entries.append(f"127.0.0.1 {site}")
 
-                # Add www variant if not already www
                 if not site.startswith("www."):
-                    block_entries.append(f"0.0.0.0 www.{site}")
+                    block_entries.append(f"127.0.0.1 www.{site}")
 
             block_entries.append(HOSTS_MARKER_END)
 
@@ -191,6 +194,62 @@ class WebsiteBlocker:
         if domain and domain not in self.always_blocked_sites:
             self.always_blocked_sites.add(domain)
             self._apply_always_blocked()
+
+    def sync_always_blocked_if_stale(self) -> Tuple[bool, str]:
+        """Re-apply the adult block to /etc/hosts if it's out of date.
+
+        New adult-site entries added to ADULT_SITES (e.g. javguru.guru)
+        only land in /etc/hosts when this runs.  No-ops when the
+        on-disk block already matches always_blocked_sites, so it
+        won't trigger an osascript prompt on every startup.
+        """
+        if not self.always_blocked_sites:
+            return True, "no adult sites to sync"
+        try:
+            if not self._adult_block_is_stale():
+                return True, "adult block already in sync"
+        except Exception as e:
+            self._last_error = f"Stale-check failed: {e}"
+            return False, self._last_error
+        return self._apply_always_blocked()
+
+    def _adult_block_is_stale(self) -> bool:
+        """True iff on-disk adult block lines != expected entries."""
+        if not HOSTS_PATH.exists():
+            return True
+        content = self._read_hosts()
+
+        on_disk: Set[str] = set()
+        in_block = False
+        for line in content.split("\n"):
+            if HOSTS_ADULT_MARKER_START in line:
+                in_block = True
+                continue
+            if HOSTS_ADULT_MARKER_END in line:
+                in_block = False
+                continue
+            if not in_block:
+                continue
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split()
+            # Accept any redirect IP (we used 0.0.0.0 historically,
+            # 127.0.0.1 now — both should be treated as "this domain
+            # is in the block list").
+            if len(parts) >= 2 and parts[0] in ("0.0.0.0", "127.0.0.1"):
+                on_disk.add(parts[1].lower())
+
+        expected: Set[str] = set()
+        for site in self.always_blocked_sites:
+            site = site.strip().lower()
+            if not site:
+                continue
+            expected.add(site)
+            if not site.startswith("www."):
+                expected.add("www." + site)
+
+        return on_disk != expected
 
     def update_whitelisted_urls(self, whitelisted_urls: list) -> None:
         """Update the list of whitelisted URLs."""
@@ -336,9 +395,9 @@ class WebsiteBlocker:
                 if not site:
                     continue
 
-                block_entries.append(f"0.0.0.0 {site}")
+                block_entries.append(f"127.0.0.1 {site}")
                 if not site.startswith("www."):
-                    block_entries.append(f"0.0.0.0 www.{site}")
+                    block_entries.append(f"127.0.0.1 www.{site}")
 
             block_entries.append(HOSTS_ADULT_MARKER_END)
 
@@ -439,3 +498,46 @@ class WebsiteBlocker:
 
         except Exception as e:
             return False, f"Error checking hosts file: {e}"
+
+
+if __name__ == "__main__":
+    # Standalone sync entry point — run as
+    #   python3 -m src.core.website_blocker --sync-adult
+    # to refresh /etc/hosts from the current ADULT_SITES list without
+    # restarting the running app. Triggers a single osascript prompt.
+    import argparse
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
+
+    from src.data.default_blocklists import get_adult_sites
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sync-adult", action="store_true",
+                        help="Re-apply adult-block to /etc/hosts if stale")
+    parser.add_argument("--force-sync-adult", action="store_true",
+                        help="Re-apply adult-block to /etc/hosts unconditionally")
+    parser.add_argument("--check-adult", action="store_true",
+                        help="Print whether adult block is stale (no write)")
+    args = parser.parse_args()
+
+    adult = get_adult_sites()
+    wb = WebsiteBlocker(blocked_sites=set(), always_blocked_sites=adult, has_admin=False)
+
+    if args.check_adult:
+        stale = wb._adult_block_is_stale()
+        print(f"adult-block stale: {stale}  ({len(adult)} sites in source)")
+        _sys.exit(1 if stale else 0)
+
+    if args.force_sync_adult:
+        ok, msg = wb._apply_always_blocked()
+        print(f"force-sync ok: {ok}  msg: {msg}")
+        _sys.exit(0 if ok else 1)
+
+    if args.sync_adult:
+        ok, msg = wb.sync_always_blocked_if_stale()
+        print(f"sync ok: {ok}  msg: {msg}")
+        _sys.exit(0 if ok else 1)
+
+    parser.print_help()
