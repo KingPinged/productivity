@@ -19,32 +19,53 @@ from src.app import ProductivityApp
 
 
 def _launch_guard() -> None:
-    """Spawn two process guards that watch our PID and each other."""
-    from src.core.process_guard import count_running_guards
+    """Spawn two process guards that watch our PID and each other.
 
-    existing = count_running_guards(exclude_pid=os.getpid())
+    Counts only guards that are *actually* watching this app's PID
+    (via state file or cmdline).  Guards left behind by previous app
+    instances — watching dead PIDs — are killed first so they can be
+    replaced cleanly.
+    """
+    from src.core.process_guard import (
+        count_guards_watching_pid,
+        kill_orphaned_guards,
+        _enumerate_guards,
+    )
+
+    my_pid = os.getpid()
+
+    # Reap guards stuck watching dead PIDs from previous runs
+    kill_orphaned_guards(current_app_pid=my_pid)
+
+    existing = count_guards_watching_pid(my_pid, exclude_pid=my_pid)
     if existing >= 2:
-        print(f"Both guards already running ({existing} found) — skipping spawn")
+        print(f"Both guards already watching PID {my_pid} ({existing} found) — skipping spawn")
         return
+
+    # Identify which guard IDs already cover us so we don't double up
+    covered_ids = {
+        g.get("guard_id")
+        for g in _enumerate_guards()
+        if g.get("watched_pid") == my_pid and isinstance(g.get("guard_id"), int)
+    }
 
     guard_script = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "core", "process_guard.py"
     )
-    my_pid = str(os.getpid())
+    my_pid_str = str(my_pid)
 
     for guard_id in (1, 2):
-        # Skip if we already have enough guards
-        if existing >= guard_id:
+        if guard_id in covered_ids:
             continue
         try:
             subprocess.Popen(
                 [sys.executable, guard_script,
-                 "--watch-pid", my_pid,
+                 "--watch-pid", my_pid_str,
                  "--guard-id", str(guard_id)],
                 start_new_session=True,
             )
-            print(f"Guard-{guard_id} launched (watching PID {my_pid})")
+            print(f"Guard-{guard_id} launched (watching PID {my_pid_str})")
         except Exception as e:
             print(f"Failed to launch guard-{guard_id}: {e}")
 

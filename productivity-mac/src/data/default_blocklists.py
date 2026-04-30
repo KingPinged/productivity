@@ -978,7 +978,7 @@ ADULT_SITES = [
     # ============================================
     "jav.guru",
     "javtiful.com",
-    "www.javtiful.com"
+    "www.javtiful.com",
     "www.jav.guru",
     "javhd.com",
     "www.javhd.com",
